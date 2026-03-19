@@ -1,6 +1,9 @@
 #include <Arduino.h>
 #include <STM32FreeRTOS.h>
 
+#include <SPI.h>
+#include <SPIMemory.h>
+
 typedef enum
 {
   CMD_LED_ON,
@@ -15,7 +18,11 @@ typedef struct
   uint32_t param;
 } Message_t;
 
-QueueHandle_t queueCmd;
+QueueHandle_t queueLed;
+QueueHandle_t queueComm;
+
+SPIFlash *flash;
+HardwareSerial Serial1(PA10, PA9);
 
 // Task handle (optional)
 TaskHandle_t ledTaskHandle;
@@ -25,11 +32,12 @@ void ledTask(void *pvParameters)
 {
   Message_t msg;
 
-   pinMode(PF0, OUTPUT);
+  pinMode(PF0, OUTPUT);
+  pinMode(PB15, OUTPUT);
 
   while (1)
   {
-    if (xQueueReceive(queueCmd, &msg, portMAX_DELAY) == pdPASS)
+    if (xQueueReceive(queueLed, &msg, portMAX_DELAY) == pdPASS)
     {
       switch (msg.cmd)
       {
@@ -58,11 +66,11 @@ void commTask(void *pvParameters)
 
   while (1)
   {
-    if (xQueueReceive(queueCmd, &msg, portMAX_DELAY) == pdPASS)
+    if (xQueueReceive(queueComm, &msg, portMAX_DELAY) == pdPASS)
     {
       if (msg.cmd == CMD_PRINT)
       {
-        Serial.println("PRINT CMD received");
+        Serial1.println("PRINT CMD received");
       }
     }
     vTaskDelay(100);
@@ -72,21 +80,16 @@ void commTask(void *pvParameters)
 void mainTask(void *pvParameters)
 {
   Message_t msg;
-  pinMode(PF0, OUTPUT);
   while (1)
   {
     // Ví dụ gửi lệnh toggle LED
-    // msg.cmd = CMD_LED_TOGGLE;
-    // xQueueSend(queueCmd, &msg, portMAX_DELAY);
-
-     digitalWrite(PF0, HIGH);
+    msg.cmd = CMD_LED_TOGGLE;
+    xQueueSend(queueLed, &msg, portMAX_DELAY);
 
     vTaskDelay(pdMS_TO_TICKS(1000));
 
-    // // gửi lệnh print
-    // msg.cmd = CMD_PRINT;
-    // xQueueSend(queueCmd, &msg, portMAX_DELAY);
-     digitalWrite(PF0, LOW);
+    msg.cmd = CMD_LED_TOGGLE;
+    xQueueSend(queueLed, &msg, portMAX_DELAY);
 
     vTaskDelay(pdMS_TO_TICKS(1000));
   }
@@ -94,12 +97,15 @@ void mainTask(void *pvParameters)
 
 void setup()
 {
-   __HAL_RCC_GPIOF_CLK_ENABLE();
-  Serial.begin(115200);
-
-  // Tạo queue (10 message)
-  queueCmd = xQueueCreate(10, sizeof(Message_t));
-
+  __HAL_RCC_GPIOF_CLK_ENABLE();
+  Serial1.begin(115200);
+  SPI.begin();
+  flash = new SPIFlash(PA8);
+  flash->begin();
+  queueLed = xQueueCreate(10, sizeof(Message_t));
+  queueComm = xQueueCreate(10, sizeof(Message_t));
+  pinMode(PB15, OUTPUT);
+  digitalWrite(PB15, 1);
   // Tạo task
   xTaskCreate(mainTask, "MAIN", 256, NULL, 2, NULL);
   xTaskCreate(ledTask, "LED", 256, NULL, 1, &ledTaskHandle);
@@ -109,6 +115,19 @@ void setup()
   vTaskStartScheduler();
 }
 
+uint32_t addr = 0;
+
 void loop()
 {
+  vTaskDelay(portMAX_DELAY);
+  if (Serial1.available())
+  {
+    uint8_t buf[256];
+    int len = Serial1.readBytes(buf, sizeof(buf));
+
+    flash->writeByteArray(addr, buf, len);
+    addr += len;
+
+    Serial1.write("OK", 2);
+  }
 }
