@@ -198,6 +198,7 @@ bool flashFsWriteFileFromSerial(SPIFlash *flash, const char *name, uint32_t leng
   uint32_t offset = 0;
 
   // Ensure we can wait long enough for all bytes to arrive.
+  uint32_t originalTimeout = Serial1.getTimeout();
   Serial1.setTimeout(15000);
 
   while (remaining > 0)
@@ -205,14 +206,23 @@ bool flashFsWriteFileFromSerial(SPIFlash *flash, const char *name, uint32_t leng
     uint32_t chunkSize = (remaining < bufSize) ? remaining : bufSize;
     size_t got = Serial1.readBytes(buffer, chunkSize);
     if (got != chunkSize)
+    {
+      Serial1.setTimeout(originalTimeout);  // Restore timeout before returning
       return false;
+    }
 
     if (!flash->writeByteArray(nextAddr + offset, buffer, chunkSize, true))
+    {
+      Serial1.setTimeout(originalTimeout);  // Restore timeout before returning
       return false;
+    }
 
     offset += chunkSize;
     remaining -= chunkSize;
   }
+
+  // Restore original timeout
+  Serial1.setTimeout(originalTimeout);
 
   strncpy(header.files[entryIndex].name, name, FLASH_FS_NAME_LEN);
   header.files[entryIndex].name[FLASH_FS_NAME_LEN - 1] = '\0';
@@ -284,4 +294,9 @@ bool flashFsPlayAudio(SPIFlash *flash, const char *name)
   // Stop PWM output.
   analogWrite(AUDIO_PWM_PIN, 0);
   return true;
+}
+
+bool flashFsGetFileInfo(SPIFlash *flash, const char *name, uint32_t &outAddr, uint32_t &outLength)
+{
+  return _getFileInfo(flash, name, outAddr, outLength);
 }

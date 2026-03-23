@@ -53,3 +53,7 @@ bool flashFsReadFile(SPIFlash *flash, const char *name, uint8_t *buffer, uint32_
 /// Play an audio file (8-bit PCM) through a PWM pin (AUDIO_PWM_PIN).
 /// This is a blocking call and will return after playback completes.
 bool flashFsPlayAudio(SPIFlash *flash, const char *name);
+
+/// Get file information from filesystem (for DAC playback)
+/// Used internally by audio_dac module
+bool flashFsGetFileInfo(SPIFlash *flash, const char *name, uint32_t &outAddr, uint32_t &outLength);

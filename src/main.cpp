@@ -7,6 +7,7 @@
 #include "pinout.h"
 #include "motor_control.h"
 #include "flash_files.h"
+#include "audio_dac.h"
 
 typedef enum
 {
@@ -85,6 +86,10 @@ void commTask(void *pvParameters)
   //   PLAY <name>    - play an 8-bit PCM file stored in flash
   //   HELP           - show this help message
 
+  // Print startup message to verify UART is working
+  Serial1.println(F("\n=== COMM Task Started ==="));
+  Serial1.println(F("Type HELP for commands\n"));
+
   while (1)
   {
     if (Serial1.available())
@@ -101,6 +106,20 @@ void commTask(void *pvParameters)
       if (line.equalsIgnoreCase("LIST"))
       {
         flashFsListFiles(flash);
+      }
+      else if (line.equalsIgnoreCase("MEM"))
+      {
+        // Report memory stats
+        uint32_t freeHeap = xPortGetFreeHeapSize();
+        uint32_t flashCapacity = flash->getCapacity();
+
+        Serial1.println(F("Memory Stats:"));
+        Serial1.print(F("  RAM Free: "));
+        Serial1.print(freeHeap);
+        Serial1.println(F(" bytes"));
+        Serial1.print(F("  Flash Capacity: "));
+        Serial1.print(flashCapacity / 1024);
+        Serial1.println(F(" KB"));
       }
       else if (line.startsWith("PLAY "))
       {
@@ -167,6 +186,7 @@ void commTask(void *pvParameters)
       {
         Serial1.println(F("Commands:"));
         Serial1.println(F("  LIST"));
+        Serial1.println(F("  MEM"));
         Serial1.println(F("  PLAY <name>"));
         Serial1.println(F("  MOTOR<n> ON|OFF  (n=1-4)"));
         Serial1.println(F("  STORE <name> <length>    (then send <length> raw bytes)"));
@@ -225,10 +245,18 @@ void audioTask(void *pvParameters)
     {
       if (msg.cmd == CMD_PLAY_AUDIO)
       {
-        if (!flashFsPlayAudio(flash, msg.name))
+        Serial1.print(F("Playing: "));
+        Serial1.println(msg.name);
+        
+        // Note: audioDacPlayFile() is BLOCKING - this task will wait until playback completes
+        if (!audioDacPlayFile(flash, msg.name))
         {
           Serial1.print(F("Failed to play: "));
           Serial1.println(msg.name);
+        }
+        else
+        {
+          Serial1.println(F("Playback complete"));
         }
       }
     }
@@ -353,42 +381,71 @@ void setup()
 {
   // Ensure GPIO port clocks are enabled for all used pins.
   // Update these if you change LED/USART/SPI pins in pinout.h.
+  __HAL_RCC_GPIOA_CLK_ENABLE();  // PA9, PA10 for UART1 + SPI pins
   __HAL_RCC_GPIOF_CLK_ENABLE();
   __HAL_RCC_GPIOD_CLK_ENABLE();
   __HAL_RCC_GPIOB_CLK_ENABLE();
   __HAL_RCC_GPIOC_CLK_ENABLE();
 
+  // Wait a bit for clocks to settle
+  delayMicroseconds(100);
+
+  // OPTION 1: Use SerialUSB (recommended on Nucleo - through ST-Link)
+  // Uncomment below and comment out Serial1.begin() if you want ST-Link UART
+  // SerialUSB.begin(115200);
+  
+  // OPTION 2: Use Serial1 (physical PA9/PA10 pins - needs external adapter)
   Serial1.begin(115200);
+  
+  // Small delay to ensure Serial is ready
+  delay(100);
+  
+  Serial1.println(F("\n\n=== System Starting ==="));
+  Serial1.println(F("Board: Nucleo G070RB"));
+  Serial1.println(F("UART: Serial1 PA9(TX) PA10(RX) @ 115200 baud\n"));
 
   // Initialize SPI with the pins used on the board.
   SPI.begin();
   flash = new SPIFlash(FLASH_SPI_CS_PIN);
-  flash->begin();
+  
+  if (!flash->begin())
+  {
+    Serial1.println(F("ERROR: Flash initialization failed"));
+    return;
+  }
 
   // Initialize a very small filesystem in SPI flash so we can store/play files.
-  flashFsInit(flash);
+  if (!flashFsInit(flash))
+  {
+    Serial1.println(F("ERROR: Flash filesystem init failed"));
+    return;
+  }
 
   motorInit();
+  audioDacInit();
 
   queueLed = xQueueCreate(10, sizeof(Message_t));
+  if (queueLed == NULL) { Serial1.println(F("ERROR: LED queue creation failed")); return; }
+  
   queueComm = xQueueCreate(10, sizeof(Message_t));
+  if (queueComm == NULL) { Serial1.println(F("ERROR: COMM queue creation failed")); return; }
+  
   queueAudio = xQueueCreate(5, sizeof(Message_t));
+  if (queueAudio == NULL) { Serial1.println(F("ERROR: AUDIO queue creation failed")); return; }
+  
   queueMotor = xQueueCreate(5, sizeof(Message_t));
+  if (queueMotor == NULL) { Serial1.println(F("ERROR: MOTOR queue creation failed")); return; }
 
   pinMode(LED_STATUS_PIN, OUTPUT);
   digitalWrite(LED_STATUS_PIN, HIGH);
 
-  // Prepare audio output pin for playback.
-  pinMode(AUDIO_PWM_PIN, OUTPUT);
-  analogWrite(AUDIO_PWM_PIN, 0);
-
-  // Tạo task
-  xTaskCreate(mainTask, "MAIN", 256, NULL, 2, NULL);
-  xTaskCreate(ledTask, "LED", 256, NULL, 1, &ledTaskHandle);
-  xTaskCreate(commTask, "COMM", 256, NULL, 1, &commTaskHandle);
-  xTaskCreate(audioTask, "AUDIO", 256, NULL, 1, &audioTaskHandle);
-  xTaskCreate(motorTask, "MOTOR", 256, NULL, 1, &motorTaskHandle);
-  xTaskCreate(buttonTask, "BUTTON", 256, NULL, 1, &buttonTaskHandle);
+  // Tạo task (increased stack size to prevent overflow)
+  xTaskCreate(mainTask, "MAIN", 512, NULL, 2, NULL);
+  xTaskCreate(ledTask, "LED", 512, NULL, 1, &ledTaskHandle);
+  xTaskCreate(commTask, "COMM", 768, NULL, 1, &commTaskHandle);  // COMM needs more stack for strings
+  xTaskCreate(audioTask, "AUDIO", 1024, NULL, 1, &audioTaskHandle);  // AUDIO uses buffers
+  xTaskCreate(motorTask, "MOTOR", 512, NULL, 1, &motorTaskHandle);
+  xTaskCreate(buttonTask, "BUTTON", 512, NULL, 1, &buttonTaskHandle);
 
   // Start scheduler
   vTaskStartScheduler();
