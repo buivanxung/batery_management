@@ -32,16 +32,16 @@
 //
 // When motorSet() is called, both pins are driven HIGH for ON and LOW for OFF.
 #define MOTOR1_IN_PIN     PB0
-#define MOTOR1_CTRL_PIN   PC0
+#define MOTOR1_CTRL_PIN   PB15
 
 #define MOTOR2_IN_PIN     PB1
 #define MOTOR2_CTRL_PIN   PC1
 
 #define MOTOR3_IN_PIN     PB2
-#define MOTOR3_CTRL_PIN   PC2
+#define MOTOR3_CTRL_PIN   PC3
 
 #define MOTOR4_IN_PIN     PB3
-#define MOTOR4_CTRL_PIN   PC3
+#define MOTOR4_CTRL_PIN   PC5
 
 // --- Audio output (PWM) ---
 // Used by the audio playback helper.
@@ -51,3 +51,8 @@
 // --- Button input ---
 // For multi-function button control.
 #define BUTTON_PIN         PB4  // Adjust to your schematic
+
+#define MUX_S0 A11
+#define MUX_S1 A12
+#define MUX_S2 A15
+#define MUX_SIG PA0

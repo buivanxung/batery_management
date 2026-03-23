@@ -29,6 +29,7 @@ void motorInit(void)
     digitalWrite(motorInPins[i], LOW);
     digitalWrite(motorCtrlPins[i], LOW);
   }
+  Serial1.println(F("===Motors initialized\n"));
 }
 
 void motorSet(MotorId motor, bool on)

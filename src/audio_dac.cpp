@@ -24,8 +24,9 @@ extern bool flashFsGetFileInfo(SPIFlash *flash, const char *name, uint32_t &outA
 void audioDacInit(void)
 {
   pinMode(AUDIO_PWM_PIN, OUTPUT);
-  analogWrite(AUDIO_PWM_PIN, 128);  // Center: 0-255, center is 128
-  memset((void*)&audioState, 0, sizeof(audioState));
+  analogWrite(AUDIO_PWM_PIN, 128); // Center: 0-255, center is 128
+  memset((void *)&audioState, 0, sizeof(audioState));
+  Serial1.println(F("audioDacInit initialized\n"));
 }
 
 bool audioDacPlayFile(SPIFlash *flash, const char *filename)
@@ -57,7 +58,7 @@ bool audioDacPlayFile(SPIFlash *flash, const char *filename)
   while (remaining > 0 && audioState.isPlaying)
   {
     uint32_t chunkSize = (remaining < sizeof(buffer)) ? remaining : sizeof(buffer);
-    
+
     if (!flash->readByteArray(addr + offset, buffer, chunkSize, true))
       return false;
 
@@ -73,7 +74,7 @@ bool audioDacPlayFile(SPIFlash *flash, const char *filename)
   }
 
   // Cleanup
-  analogWrite(AUDIO_PWM_PIN, 128);  // Center: 128 is the neutral point
+  analogWrite(AUDIO_PWM_PIN, 128); // Center: 128 is the neutral point
   audioState.isPlaying = false;
   return true;
 }
@@ -86,19 +87,19 @@ bool audioDacIsPlaying(void)
 void audioDacStop(void)
 {
   audioState.isPlaying = false;
-  analogWrite(AUDIO_PWM_PIN, 128);  // Center: 128 is the neutral point
-  memset((void*)&audioState, 0, sizeof(audioState));
+  analogWrite(AUDIO_PWM_PIN, 128); // Center: 128 is the neutral point
+  memset((void *)&audioState, 0, sizeof(audioState));
 }
 
 uint8_t audioDacGetProgress(void)
 {
   if (audioState.dataLength == 0)
     return 0;
-  
+
   uint32_t pos = audioState.playbackPos;
   if (pos > audioState.dataLength)
     pos = audioState.dataLength;
-  
+
   return (uint8_t)((pos * 100UL) / audioState.dataLength);
 }
 
