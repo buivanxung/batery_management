@@ -1,5 +1,6 @@
 #include "audio_dac.h"
 #include "pinout.h"
+#include "logger.h"
 #include <string.h>
 
 // ===== Audio Playback State =====
@@ -26,7 +27,7 @@ void audioDacInit(void)
   pinMode(AUDIO_PWM_PIN, OUTPUT);
   analogWrite(AUDIO_PWM_PIN, 128); // Center: 0-255, center is 128
   memset((void *)&audioState, 0, sizeof(audioState));
-  Serial1.println(F("audioDacInit initialized\n"));
+  logPrintln(F("audioDacInit initialized"));
 }
 
 bool audioDacPlayFile(SPIFlash *flash, const char *filename)
@@ -64,7 +65,10 @@ bool audioDacPlayFile(SPIFlash *flash, const char *filename)
 
     for (uint32_t i = 0; i < chunkSize; ++i)
     {
-      analogWrite(AUDIO_PWM_PIN, buffer[i]);
+      // Convert signed 8-bit PCM (-128 to 127) to unsigned 8-bit (0 to 255)
+      // Center at 128: silence = 0 signed -> 128 unsigned
+      uint8_t pwmValue = (uint8_t)((int8_t)buffer[i] + 128);
+      analogWrite(AUDIO_PWM_PIN, pwmValue);
       delayMicroseconds(periodUs);
     }
 

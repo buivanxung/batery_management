@@ -1,5 +1,8 @@
 #include "bat_handle.h"
 #include "bat_man.h"
+#include "logger.h"
+
+SemaphoreHandle_t adcMutex;
 
 void muxInit()
 {
@@ -8,6 +11,8 @@ void muxInit()
     pinMode(MUX_S2, OUTPUT);
 
     pinMode(MUX_SIG, INPUT_ANALOG);
+
+    logPrintln(F("muxInit initialized"));
 }
 
 void muxSelect(uint8_t channel)
@@ -21,38 +26,69 @@ uint16_t muxRead(uint8_t channel)
 {
     muxSelect(channel);
 
-    delayMicroseconds(5); // ⚠️ rất quan trọng
+    delayMicroseconds(5); // critical hold time for MUX settling
 
     return analogRead(MUX_SIG);
 }
 
+// ADC calibration constants
+static constexpr float ADC_VREF = 3.3f;       // STM32 ADC reference voltage (V)
+static constexpr float ADC_MAX_COUNTS = 4095.0f;
+
+// Divider for battery to ADC input (example 100k + 68k)
+// V_adc = V_bat * (R_bottom/(R_top+R_bottom))
+// V_bat = V_adc * ((R_top+R_bottom)/R_bottom)
+static constexpr float R_TOP = 100000.0f;
+static constexpr float R_BOTTOM = 68000.0f;
+static constexpr float BAT_MULT = (R_TOP + R_BOTTOM) / R_BOTTOM;
+
+float adcValueToBatteryVoltage(uint16_t adcValue)
+{
+    float vAdc = (adcValue / ADC_MAX_COUNTS) * ADC_VREF;
+    return vAdc * BAT_MULT;
+}
+
 void muxReadAll(uint16_t *values)
 {
+    xSemaphoreTake(adcMutex, portMAX_DELAY);
     for (uint8_t i = 0; i < 8; i++)
     {
         values[i] = muxRead(i);
     }
+    xSemaphoreGive(adcMutex);
 }
 
 void adcTask(void *pvParameters)
 {
     uint16_t adcValues[8];
 
+    logPrintln(F("adcTask started"));
+
     while (1)
     {
         muxReadAll(adcValues);
 
-        Serial1.println("ADC:");
+        logPrintln("ADC:");
 
         for (int i = 0; i < 8; i++)
         {
-            Serial1.print("CH");
-            Serial1.print(i);
-            Serial1.print(": ");
-            Serial1.println(adcValues[i]);
+            float vBat = adcValueToBatteryVoltage(adcValues[i]);
+            logPrint("CH");
+            logPrint(i);
+            logPrint(" raw=");
+            logPrint(adcValues[i]);
+            logPrint(" bat=");
+            char tmp[32];
+            snprintf(tmp, sizeof(tmp), "%.3fV", vBat);
+            logPrintln(tmp);
+
+            if (vBat < BAT_UNDERVOLTAGE)
+                logPrintln("WARNING: UNDER-VOLTAGE");
+            else if (vBat > BAT_OVERVOLTAGE)
+                logPrintln("WARNING: OVER-VOLTAGE");
         }
 
-        Serial1.println("----------------");
+        logPrintln("----------------");
 
         vTaskDelay(pdMS_TO_TICKS(1000));
     }

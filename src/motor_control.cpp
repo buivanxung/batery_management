@@ -1,6 +1,7 @@
 #include "Arduino.h"
 #include "pinout.h"
 #include "motor_control.h"
+#include "logger.h"
 
 static const uint8_t motorInPins[] = {
     0,              // index 0 unused (motors are 1-based)
@@ -29,7 +30,7 @@ void motorInit(void)
     digitalWrite(motorInPins[i], LOW);
     digitalWrite(motorCtrlPins[i], LOW);
   }
-  Serial1.println(F("===Motors initialized\n"));
+  logPrintln(F("===Motors initialized"));
 }
 
 void motorSet(MotorId motor, bool on)

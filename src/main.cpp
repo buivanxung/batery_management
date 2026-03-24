@@ -1,11 +1,14 @@
 #include <Arduino.h>
 #include <STM32FreeRTOS.h>
+#include <IWatchdog.h>
 
 #include "pinout.h"
 #include "motor_control.h"
 #include "flash_files.h"
 #include "audio_dac.h"
 #include "bat_man.h"
+#include "bat_handle.h"
+#include "logger.h"
 
 /* ===================== GLOBAL ===================== */
 QueueHandle_t queueLed;
@@ -20,7 +23,7 @@ void safeQueueSend(QueueHandle_t q, Message_t *msg)
 {
   if (xQueueSend(q, msg, 0) != pdPASS)
   {
-    Serial1.println(F("Queue FULL!"));
+    logPrintln(F("Queue FULL!"));
   }
 }
 
@@ -66,9 +69,9 @@ void motorTask(void *pvParameters)
       {
         motorSet((MotorId)msg.param, msg.on);
 
-        Serial1.print(F("Motor "));
-        Serial1.print(msg.param);
-        Serial1.println(msg.on ? F(" ON") : F(" OFF"));
+        logPrint(F("Motor "));
+        logPrint(msg.param);
+        logPrintln(msg.on ? F(" ON") : F(" OFF"));
       }
     }
   }
@@ -85,16 +88,16 @@ void audioTask(void *pvParameters)
     {
       if (msg.cmd == CMD_PLAY_AUDIO)
       {
-        Serial1.print(F("Play: "));
-        Serial1.println(msg.name);
+        logPrint(F("Play: "));
+        logPrintln(msg.name);
 
         if (!audioDacPlayFile(&flash, msg.name))
         {
-          Serial1.println(F("Play FAIL"));
+          logPrintln(F("Play FAIL"));
         }
         else
         {
-          Serial1.println(F("Play DONE"));
+          logPrintln(F("Play DONE"));
         }
       }
     }
@@ -108,6 +111,9 @@ void mainTask(void *pvParameters)
 
   while (1)
   {
+    // Reload watchdog to prevent reset
+    IWatchdog.reload();
+
     msg.cmd = CMD_LED_TOGGLE;
     safeQueueSend(queueLed, &msg);
 
@@ -126,7 +132,10 @@ void setup()
   Serial1.begin(UART_BAUD);
   delay(100);
 
-  Serial1.println(F("System Boot"));
+  // Initialize Independent Watchdog (10 second timeout)
+  IWatchdog.begin(10000000);
+
+  logPrintln(F("System Boot"));
 
   /* SPI */
   SPI.setMISO(FLASH_SPI_MISO_PIN);
@@ -136,20 +145,30 @@ void setup()
 
   if (!flash.begin())
   {
-    Serial1.println(F("Flash FAIL"));
+    logPrintln(F("Flash FAIL"));
     while (1)
       ;
   }
 
   if (!flashFsInit(&flash))
   {
-    Serial1.println(F("FS FAIL"));
+    logPrintln(F("FS FAIL"));
     while (1)
       ;
   }
 
   motorInit();
   audioDacInit();
+  muxInit();  // Initialize ADC multiplexer
+
+  /* ADC Mutex */
+  adcMutex = xSemaphoreCreateMutex();
+  if (!adcMutex)
+  {
+    logPrintln(F("ADC Mutex FAIL"));
+    while (1)
+      ;
+  }
 
   /* QUEUE */
   queueLed = xQueueCreate(5, sizeof(Message_t));
@@ -158,12 +177,14 @@ void setup()
 
   if (!queueLed || !queueAudio || !queueMotor)
   {
-    Serial1.println(F("Queue FAIL"));
+    logPrintln(F("Queue FAIL"));
     while (1)
       ;
   }
 
   cli_set_command(queueLed, queueAudio, queueMotor, &flash);
+
+  loggerInit();
 
   /* TASK */
   xTaskCreate(mainTask, "MAIN", 512, NULL, 2, NULL);
@@ -171,6 +192,7 @@ void setup()
   xTaskCreate(commTask, "COMM", 1024, NULL, 1, NULL);
   xTaskCreate(audioTask, "AUDIO", 1536, NULL, 1, NULL);
   xTaskCreate(motorTask, "MOTOR", 512, NULL, 1, NULL);
+  xTaskCreate(adcTask, "ADC", 512, NULL, 1, NULL);  // Add ADC task
 
   vTaskStartScheduler();
 }

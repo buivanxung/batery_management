@@ -1,5 +1,6 @@
 #include "flash_files.h"
 #include "pinout.h"
+#include "logger.h"
 #include <string.h>
 
 static bool _eraseSectorRange(SPIFlash *flash, uint32_t start, uint32_t length)
@@ -57,16 +58,12 @@ bool flashFsListFiles(SPIFlash *flash)
   if (!_readHeader(flash, header))
     return false;
 
-  Serial1.println(F("Flash files:"));
+  logPrintln(F("Flash files:"));
   for (uint8_t i = 0; i < header.fileCount; ++i)
   {
-    Serial1.print(i);
-    Serial1.print(F(": "));
-    Serial1.print(header.files[i].name);
-    Serial1.print(F(" @0x"));
-    Serial1.print(header.files[i].addr, HEX);
-    Serial1.print(F(" len="));
-    Serial1.println(header.files[i].length);
+    char buf[64];
+    snprintf(buf, sizeof(buf), "%d: %s @0x%08X len=%lu", i, header.files[i].name, (unsigned int)header.files[i].addr, (unsigned long)header.files[i].length);
+    logPrintln(buf);
   }
   return true;
 }
@@ -283,7 +280,9 @@ bool flashFsPlayAudio(SPIFlash *flash, const char *name)
 
     for (uint32_t i = 0; i < chunkSize; ++i)
     {
-      analogWrite(AUDIO_PWM_PIN, buffer[i]);
+      // Convert signed 8-bit PCM (-128 to 127) to unsigned 8-bit (0 to 255)
+      uint8_t pwmValue = (uint8_t)((int8_t)buffer[i] + 128);
+      analogWrite(AUDIO_PWM_PIN, pwmValue);
       delayMicroseconds(periodUs);
     }
 
@@ -291,8 +290,8 @@ bool flashFsPlayAudio(SPIFlash *flash, const char *name)
     remaining -= chunkSize;
   }
 
-  // Stop PWM output.
-  analogWrite(AUDIO_PWM_PIN, 0);
+  // Stop PWM output (set to center/silence).
+  analogWrite(AUDIO_PWM_PIN, 128);
   return true;
 }
 

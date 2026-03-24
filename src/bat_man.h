@@ -5,7 +5,7 @@
 #include <SPIMemory.h>
 
 /* ===================== CONFIG ===================== */
-#define UART_BAUD 9600
+#define UART_BAUD 115200  // Changed back to 115200 for compatibility
 #define CMD_BUFFER_SIZE 64
 
 /* ===================== TYPES ===================== */

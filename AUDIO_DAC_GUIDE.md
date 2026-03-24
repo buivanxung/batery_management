@@ -1,6 +1,6 @@
 # Audio DAC - Testing & Usage Guide
 
-## 🚀 Quick Start
+## Quick Start
 
 ### 1. Upload Code to Device
 ```bash
@@ -20,7 +20,7 @@ Connect with: LIST, PLAY, MOTOR, etc.
 
 ---
 
-## 📝 Serial Commands
+## Serial Commands
 
 ### Upload Audio File
 ```
@@ -60,7 +60,7 @@ MOTOR4 OFF
 
 ---
 
-## 🎵 Audio File Preparation
+## Audio File Preparation
 
 ### Create 8-bit PCM Audio (Linux/Mac)
 
@@ -88,7 +88,7 @@ ls -la output.raw
 
 ---
 
-## 🧪 Testing Sequences
+## Testing Sequences
 
 ### Test 1: Verify Flash Storage
 ```
@@ -149,7 +149,7 @@ Serial > PLAY alarm.raw
 
 ---
 
-## ⚠️ Troubleshooting
+## Troubleshooting
 
 ### Problem: No Sound Output
 **Check:**
@@ -214,7 +214,7 @@ xTaskCreate(audioTask, "AUDIO", 2048, NULL, 1, &audioTaskHandle);  // doubled
 
 ---
 
-## 🔍 Serial Debug Output
+## Serial Debug Output
 
 ### Healthy System Output
 ```
@@ -234,7 +234,7 @@ Failed to play: bigfile.raw          ← File not found or corrupted
 
 ---
 
-## 🎚️ Audio Quality Tips
+## Audio Quality Tips
 
 ### Better Quality (if needed):
 - Use higher sample rate (but requires more storage)
@@ -249,7 +249,7 @@ Failed to play: bigfile.raw          ← File not found or corrupted
 
 ---
 
-## 💾 Flash Storage Capacity
+## Flash Storage Capacity
 
 **Device:** W25Q32 (32 Mbit = 4 MB)
 
@@ -272,7 +272,7 @@ Serial > MEM
 
 ---
 
-## 📋 Maintenance Checklist
+## Maintenance Checklist
 
 - [ ] Verify all serial commands respond
 - [ ] Test audio playback monthly
@@ -282,7 +282,7 @@ Serial > MEM
 
 ---
 
-## ⚡ Performance Metrics
+## Performance Metrics
 
 | Parameter | Value | Notes |
 |-----------|-------|-------|
@@ -295,7 +295,7 @@ Serial > MEM
 
 ---
 
-## 🆘 Emergency Reset
+## Emergency Reset
 
 If system unresponsive:
 
@@ -312,7 +312,7 @@ All stored audio will be preserved.
 
 ---
 
-## 📞 Support Commands
+## Support Commands
 
 ```
 HELP          - Show all available commands
@@ -325,7 +325,7 @@ STORE <n.raw> - Upload new audio
 
 ---
 
-## ✅ Deployment Checklist
+## Deployment Checklist
 
 Before shipping to production:
 
@@ -338,5 +338,5 @@ Before shipping to production:
 - [ ] All error messages formatted
 - [ ] Documentation complete
 
-**Status:** Ready for testing ✅
+**Status:** Ready for testing
 
