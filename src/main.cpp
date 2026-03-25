@@ -23,7 +23,7 @@ void safeQueueSend(QueueHandle_t q, Message_t *msg)
 {
   if (xQueueSend(q, msg, 0) != pdPASS)
   {
-    logPrintln(F("Queue FULL!"));
+    logPrintln("Queue FULL!");
   }
 }
 
@@ -69,9 +69,7 @@ void motorTask(void *pvParameters)
       {
         motorSet((MotorId)msg.param, msg.on);
 
-        logPrint(F("Motor "));
-        logPrint(msg.param);
-        logPrintln(msg.on ? F(" ON") : F(" OFF"));
+        logPrintf("Motor %d set to %s", (int)msg.param, msg.on ? "ON" : "OFF");
       }
     }
   }
@@ -88,16 +86,16 @@ void audioTask(void *pvParameters)
     {
       if (msg.cmd == CMD_PLAY_AUDIO)
       {
-        logPrint(F("Play: "));
+        logPrint("Play: ");
         logPrintln(msg.name);
 
         if (!audioDacPlayFile(&flash, msg.name))
         {
-          logPrintln(F("Play FAIL"));
+          logPrintln("Play FAIL");
         }
         else
         {
-          logPrintln(F("Play DONE"));
+          logPrintln("Play DONE");
         }
       }
     }
@@ -135,7 +133,7 @@ void setup()
   // Initialize Independent Watchdog (10 second timeout)
   IWatchdog.begin(10000000);
 
-  logPrintln(F("System Boot"));
+  logPrintln("System Boot");
 
   /* SPI */
   SPI.setMISO(FLASH_SPI_MISO_PIN);
@@ -145,27 +143,27 @@ void setup()
 
   if (!flash.begin())
   {
-    logPrintln(F("Flash FAIL"));
+    logPrintln("Flash FAIL");
     while (1)
       ;
   }
 
   if (!flashFsInit(&flash))
   {
-    logPrintln(F("FS FAIL"));
+    logPrintln("FS FAIL");
     while (1)
       ;
   }
 
   motorInit();
   audioDacInit();
-  muxInit();  // Initialize ADC multiplexer
+  muxInit(); // Initialize ADC multiplexer
 
   /* ADC Mutex */
   adcMutex = xSemaphoreCreateMutex();
   if (!adcMutex)
   {
-    logPrintln(F("ADC Mutex FAIL"));
+    logPrintln("ADC Mutex FAIL");
     while (1)
       ;
   }
@@ -177,7 +175,7 @@ void setup()
 
   if (!queueLed || !queueAudio || !queueMotor)
   {
-    logPrintln(F("Queue FAIL"));
+    logPrintln("Queue FAIL");
     while (1)
       ;
   }
@@ -192,7 +190,7 @@ void setup()
   xTaskCreate(commTask, "COMM", 1024, NULL, 1, NULL);
   xTaskCreate(audioTask, "AUDIO", 1536, NULL, 1, NULL);
   xTaskCreate(motorTask, "MOTOR", 512, NULL, 1, NULL);
-  xTaskCreate(adcTask, "ADC", 512, NULL, 1, NULL);  // Add ADC task
+  xTaskCreate(adcTask, "ADC", 512, NULL, 1, NULL); // Add ADC task
 
   vTaskStartScheduler();
 }

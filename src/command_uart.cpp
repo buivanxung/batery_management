@@ -5,6 +5,7 @@
 
 #define CLI_MAX_ARGS 8
 #define CLI_BUFFER_SIZE 64
+#define UART_RX_BUFFER_SIZE 1024
 
 typedef void (*cli_func_t)(int argc, char **argv);
 
@@ -24,6 +25,7 @@ SPIFlash *_flash;
 bool uploadMode = false;
 char uploadName[16];
 uint32_t uploadLength;
+bool cliEcho = true;
 
 /* ===================== TOKENIZER ===================== */
 int cli_tokenize(char *input, char **argv)
@@ -135,7 +137,7 @@ void cmd_motor(int argc, char **argv)
 {
     if (argc < 3)
     {
-        logPrintln(F("Usage: motor <1-4> on/off"));
+        logPrintln("Usage: motor <1-4> on/off");
         return;
     }
 
@@ -158,8 +160,7 @@ void cmd_motor(int argc, char **argv)
 
 void cmd_mem(int argc, char **argv)
 {
-    logPrint(F("Heap: "));
-    logPrintln(xPortGetFreeHeapSize());
+    logPrintf("Heap: %d\n", xPortGetFreeHeapSize());
 }
 
 void cmd_list(int argc, char **argv)
@@ -176,28 +177,21 @@ void cmd_store(int argc, char **argv)
         return;
     }
 
-    const char *name = argv[1];
-    uint32_t length = atoi(argv[2]);
-
-    if (strlen(name) == 0 || strlen(name) >= 16)
-    {
-        logPrintln("Name too long or empty");
-        return;
-    }
-
-    if (length == 0 || length > 100000) // arbitrary limit
-    {
-        logPrintln("Invalid length");
-        return;
-    }
-
-    // Set upload state
-    strncpy(uploadName, name, sizeof(uploadName));
+    strncpy(uploadName, argv[1], sizeof(uploadName));
     uploadName[15] = '\0';
-    uploadLength = length;
-    uploadMode = true;
 
-    logPrintln("Send"); // Tell Python script to send data
+    uploadLength = atoi(argv[2]);
+
+    // 🔥 clear UART buffer
+    while (Serial1.available())
+        Serial1.read();
+
+    cliEcho = false;
+
+    logPrintln("OK");    // Python chờ cái này
+    logPrintln("READY"); // Python chờ cái này
+
+    uploadMode = true;
 }
 
 void cmd_format(int argc, char **argv)
@@ -255,7 +249,7 @@ void cli_execute(char *line)
         }
     }
 
-    logPrintln(F("Command not found"));
+    logPrintln("Command not found");
 }
 
 void commTask(void *pvParameters)
@@ -263,73 +257,71 @@ void commTask(void *pvParameters)
     char buffer[CLI_BUFFER_SIZE];
     uint8_t index = 0;
 
-    logPrintln(F("commTask started"));
+    logPrintln("commTask started");
     logPrint("> ");
 
     while (1)
     {
+        /* ================= UPLOAD MODE ================= */
+        if (uploadMode)
+        {
+            bool ok = flashFsWriteFileFromSerial_PRO(
+                _flash,
+                uploadName,
+                uploadLength);
+
+            uploadMode = false;
+            cliEcho = true;
+
+            if (ok)
+                logPrintln("DONE");
+            else
+                logPrintln("ERR");
+
+            logPrint("> ");
+            continue;
+        }
+
+        /* ================= CLI MODE ================= */
         while (Serial1.available())
         {
             char c = Serial1.read();
 
-            /* ===== ENTER ===== */
             if (c == '\r' || c == '\n')
             {
-                logPrintln(""); // enter
+                logPrintln("");
 
                 buffer[index] = '\0';
 
                 if (index > 0)
                 {
                     cli_execute(buffer);
-
-                    // Check if upload mode was set
-                    if (uploadMode)
-                    {
-                        bool success = flashFsWriteFileFromSerial(_flash, uploadName, uploadLength);
-                        uploadMode = false;
-                        if (success)
-                        {
-                            logPrintln("Upload successful");
-                        }
-                        else
-                        {
-                            logPrintln("Upload failed");
-                        }
-                    }
-
                     index = 0;
                 }
 
                 logPrint("> ");
             }
-
-            /* ===== BACKSPACE ===== */
-            else if (c == 0x08 || c == 0x7F) // BS or DEL
+            else if (c == 0x08 || c == 0x7F)
             {
                 if (index > 0)
                 {
                     index--;
-
-                    // clr terminal
                     Serial1.print("\b \b");
                 }
             }
-
-            /* ===== NORMAL CHAR ===== */
-            else if (c >= 32 && c <= 126) // printable ASCII
+            else if (c >= 32 && c <= 126)
             {
                 if (index < CLI_BUFFER_SIZE - 1)
                 {
                     buffer[index++] = c;
 
-                    // echo
-                    Serial1.print(c);
+                    if (cliEcho)
+                        Serial1.print(c);
                 }
             }
         }
 
-        vTaskDelay(pdMS_TO_TICKS(10));
+        vTaskDelay(pdMS_TO_TICKS(5));
     }
 }
 

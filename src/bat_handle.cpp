@@ -12,7 +12,7 @@ void muxInit()
 
     pinMode(MUX_SIG, INPUT_ANALOG);
 
-    logPrintln(F("muxInit initialized"));
+    logPrintln("muxInit initialized");
 }
 
 void muxSelect(uint8_t channel)
@@ -62,33 +62,26 @@ void adcTask(void *pvParameters)
 {
     uint16_t adcValues[8];
 
-    logPrintln(F("adcTask started"));
+    logPrintln("adcTask started");
 
     while (1)
     {
         muxReadAll(adcValues);
 
-        logPrintln("ADC:");
+        // logPrintln("ADC:");
 
         for (int i = 0; i < 8; i++)
         {
             float vBat = adcValueToBatteryVoltage(adcValues[i]);
-            logPrint("CH");
-            logPrint(i);
-            logPrint(" raw=");
-            logPrint(adcValues[i]);
-            logPrint(" bat=");
-            char tmp[32];
-            snprintf(tmp, sizeof(tmp), "%.3fV", vBat);
-            logPrintln(tmp);
+            // logPrintf("CH%d raw=%u bat=%.3fV\n", i, adcValues[i], vBat);
 
-            if (vBat < BAT_UNDERVOLTAGE)
-                logPrintln("WARNING: UNDER-VOLTAGE");
-            else if (vBat > BAT_OVERVOLTAGE)
-                logPrintln("WARNING: OVER-VOLTAGE");
+            // if (vBat < BAT_UNDERVOLTAGE)
+            //     logPrintln("WARNING: UNDER-VOLTAGE");
+            // else if (vBat > BAT_OVERVOLTAGE)
+            //     logPrintln("WARNING: OVER-VOLTAGE");
         }
 
-        logPrintln("----------------");
+        // logPrintln("----------------");
 
         vTaskDelay(pdMS_TO_TICKS(1000));
     }

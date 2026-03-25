@@ -27,7 +27,7 @@ void audioDacInit(void)
   pinMode(AUDIO_PWM_PIN, OUTPUT);
   analogWrite(AUDIO_PWM_PIN, 128); // Center: 0-255, center is 128
   memset((void *)&audioState, 0, sizeof(audioState));
-  logPrintln(F("audioDacInit initialized"));
+  logPrintln("audioDacInit initialized");
 }
 
 bool audioDacPlayFile(SPIFlash *flash, const char *filename)

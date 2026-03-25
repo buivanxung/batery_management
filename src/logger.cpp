@@ -1,7 +1,9 @@
 #include "logger.h"
+#include <stdarg.h>
 
-QueueHandle_t logQueue;
+QueueHandle_t logQueue = NULL;
 
+/* ===================== TASK ===================== */
 void loggerTask(void *pvParameters)
 {
     LogMessage_t msg;
@@ -15,69 +17,61 @@ void loggerTask(void *pvParameters)
     }
 }
 
+/* ===================== INIT ===================== */
 void loggerInit()
 {
-    logQueue = xQueueCreate(10, sizeof(LogMessage_t));
+    logQueue = xQueueCreate(20, sizeof(LogMessage_t));
+
     if (!logQueue)
     {
-        // Error, but can't log yet
         while (1)
             ;
     }
 
-    xTaskCreate(loggerTask, "LOGGER", 256, NULL, 1, NULL);
+    xTaskCreate(loggerTask, "LOGGER", 512, NULL, 1, NULL);
 }
 
-void logPrint(const char *str)
+/* ===================== CORE ===================== */
+static void logSend(const char *str)
 {
+    if (!logQueue)
+        return;
+
     LogMessage_t msg;
+
     strncpy(msg.message, str, LOG_BUFFER_SIZE - 1);
     msg.message[LOG_BUFFER_SIZE - 1] = '\0';
 
-    xQueueSend(logQueue, &msg, 0);
+    if (xQueueSend(logQueue, &msg, 0) != pdPASS)
+    {
+        // Queue full → fallback trực tiếp (tránh mất log)
+        Serial1.print("LOG DROP: ");
+        Serial1.println(msg.message);
+    }
 }
 
-void logPrint(const __FlashStringHelper *str)
+/* ===================== API ===================== */
+void logPrint(const char *str)
 {
-    String s = String(str);
-    logPrint(s.c_str());
+    logSend(str);
 }
 
 void logPrintln(const char *str)
 {
-    LogMessage_t msg;
-    size_t len = strlen(str);
-    if (len < LOG_BUFFER_SIZE - 2)
-    {
-        strcpy(msg.message, str);
-        strcat(msg.message, "\n");
-    }
-    else
-    {
-        strncpy(msg.message, str, LOG_BUFFER_SIZE - 2);
-        msg.message[LOG_BUFFER_SIZE - 2] = '\0';
-        strcat(msg.message, "\n");
-    }
+    char buf[LOG_BUFFER_SIZE];
 
-    xQueueSend(logQueue, &msg, 0);
+    snprintf(buf, sizeof(buf), "%s\r\n", str);
+    logSend(buf);
 }
 
-void logPrintln(const __FlashStringHelper *str)
+void logPrintf(const char *fmt, ...)
 {
-    String s = String(str);
-    logPrintln(s.c_str());
-}
+    char buf[LOG_BUFFER_SIZE];
 
-void logPrint(int num)
-{
-    char buf[16];
-    itoa(num, buf, 10);
-    logPrint(buf);
-}
+    va_list args;
+    va_start(args, fmt);
+    vsnprintf(buf, sizeof(buf), fmt, args);
+    va_end(args);
 
-void logPrintln(int num)
-{
-    char buf[16];
-    itoa(num, buf, 10);
-    logPrintln(buf);
+    logSend(buf);
 }

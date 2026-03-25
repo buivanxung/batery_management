@@ -30,7 +30,7 @@ void motorInit(void)
     digitalWrite(motorInPins[i], LOW);
     digitalWrite(motorCtrlPins[i], LOW);
   }
-  logPrintln(F("===Motors initialized"));
+  logPrintln("===Motors initialized");
 }
 
 void motorSet(MotorId motor, bool on)

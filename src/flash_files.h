@@ -57,3 +57,6 @@ bool flashFsPlayAudio(SPIFlash *flash, const char *name);
 /// Get file information from filesystem (for DAC playback)
 /// Used internally by audio_dac module
 bool flashFsGetFileInfo(SPIFlash *flash, const char *name, uint32_t &outAddr, uint32_t &outLength);
+
+bool flashFsWriteFileFromSerial_ACK(SPIFlash *flash, const char *name, uint32_t length);
+bool flashFsWriteFileFromSerial_PRO(SPIFlash *flash, const char *name, uint32_t length);
