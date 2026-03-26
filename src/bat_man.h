@@ -16,6 +16,7 @@ typedef enum
     CMD_LED_TOGGLE,
     CMD_PLAY_AUDIO,
     CMD_MOTOR_SET,
+    CMD_TEST_AUDIO,  ///< Test beep for DAC debug
 } CommandType;
 
 typedef struct

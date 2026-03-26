@@ -10,6 +10,10 @@ typedef enum
   MOTOR_2,
   MOTOR_3,
   MOTOR_4,
+  MOTOR_5,
+  MOTOR_6,
+  MOTOR_7,
+  MOTOR_8,
 } MotorId;
 
 /// Initialize motor GPIO pins (must be called once before using motorSet()).

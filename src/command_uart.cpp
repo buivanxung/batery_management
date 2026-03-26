@@ -67,6 +67,15 @@ void cmd_list(int argc, char **argv);
 void cmd_store(int argc, char **argv);
 void cmd_format(int argc, char **argv);
 void cmd_mon(int argc, char **argv);
+void cmd_beep(int argc, char **argv); 
+
+void cmd_beep(int argc, char **argv)
+{
+    Message_t msg;
+    msg.cmd = CMD_TEST_AUDIO;
+    safeQueueSend(_queueAudio, &msg);
+    logPrintln("Beep test queued");
+}
 
 /* ===================== COMMAND TABLE ===================== */
 cli_command_t cli_table[] =
@@ -74,13 +83,14 @@ cli_command_t cli_table[] =
         {"help", cmd_help, "Show help"},
         {"led", cmd_led, "led on/off/toggle"},
         {"play", cmd_play, "play <file>"},
-        {"motor", cmd_motor, "motor <1-4> on/off"},
+        {"motor", cmd_motor, "motor <1-8> on/off"},
         {"mem", cmd_mem, "show memory"},
         {"list", cmd_list, "show list file audio in flash"},
         {"store", cmd_store, "store <name> <length> - upload audio file"},
         {"format", cmd_format, "format flash filesystem"},
         {"mon", cmd_mon, "monitor ADC values"},
-};
+        {"beep", cmd_beep, "beep [ms] - test 1kHz tone (default 2000ms)"},
+    };
 
 #define CLI_CMD_COUNT (sizeof(cli_table) / sizeof(cli_command_t))
 
@@ -137,16 +147,16 @@ void cmd_motor(int argc, char **argv)
 {
     if (argc < 3)
     {
-        logPrintln("Usage: motor <1-4> on/off");
+        logPrintln("Usage: motor <1-8> on/off");
         return;
     }
 
     int motor = atoi(argv[1]);
     bool on = (strcmp(argv[2], "on") == 0);
 
-    if (motor < 1 || motor > 4)
+    if (motor < 1 || motor > 8)
     {
-        logPrintln("Motor must be 1-4");
+        logPrintln("Motor must be 1-8");
         return;
     }
 

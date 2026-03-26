@@ -43,6 +43,29 @@
 #define MOTOR4_IN_PIN     PB3
 #define MOTOR4_CTRL_PIN   PC5
 
+#define MOTOR5_IN_PIN     PB4
+#define MOTOR5_CTRL_PIN   PC7
+
+#define MOTOR6_IN_PIN     PB5
+#define MOTOR6_CTRL_PIN   PC9
+
+#define MOTOR7_IN_PIN     PB6
+#define MOTOR7_CTRL_PIN   PC10
+
+#define MOTOR8_IN_PIN     PB7
+#define MOTOR8_CTRL_PIN   PC11
+
+// --- Enable charge battery---
+// Enable pin control
+#define POGO1_CTR_PIN     PC8
+#define POGO2_CTR_PIN     PC6
+#define POGO3_CTR_PIN     PD9
+#define POGO4_CTR_PIN     PC2
+#define POGO5_CTR_PIN     PC0
+#define POGO6_CTR_PIN     PB14
+#define POGO7_CTR_PIN     PC12
+#define POGO8_CTR_PIN     PC13
+
 // --- Audio output (PWM) ---
 // Used by the audio playback helper.
 #define AUDIO_PWM_PIN      PA4

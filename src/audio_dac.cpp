@@ -65,9 +65,9 @@ bool audioDacPlayFile(SPIFlash *flash, const char *filename)
 
     for (uint32_t i = 0; i < chunkSize; ++i)
     {
-      // Convert signed 8-bit PCM (-128 to 127) to unsigned 8-bit (0 to 255)
-      // Center at 128: silence = 0 signed -> 128 unsigned
-      uint8_t pwmValue = (uint8_t)((int8_t)buffer[i] + 128);
+      // Convert signed 8-bit PCM to PWM with 1.3x GAIN (less loud)
+      int16_t sample = (int8_t)buffer[i];
+      uint8_t pwmValue = (uint8_t)constrain(sample * 1.3 + 128, 0, 255);
       analogWrite(AUDIO_PWM_PIN, pwmValue);
       delayMicroseconds(periodUs);
     }
@@ -107,8 +107,24 @@ uint8_t audioDacGetProgress(void)
   return (uint8_t)((pos * 100UL) / audioState.dataLength);
 }
 
-// Placeholder interrupt handler (not used in blocking approach)
+void test_beep(int duration_ms) {
+  logPrintln("BEEP TEST: 1kHz sine wave");
+  
+  const uint32_t samples = (AUDIO_SAMPLE_RATE * duration_ms) / 1000;
+  const float freq_hz = 1000.0f;
+  
+  for(uint32_t t = 0; t < samples; t++) {
+    float phase = 2 * 3.14159f * freq_hz * t / AUDIO_SAMPLE_RATE;
+    int16_t sample = 60 * sin(phase);  // 60 peak - less ear-piercing
+    uint8_t pwm = (uint8_t)constrain(sample + 128, 0, 255);
+    analogWrite(AUDIO_PWM_PIN, pwm);
+    delayMicroseconds(1000000UL / AUDIO_SAMPLE_RATE);
+  }
+  analogWrite(AUDIO_PWM_PIN, 128);
+  logPrintln("BEEP DONE");
+}
+
+// Placeholder interrupt handler (not used)
 extern "C" void TIM2_IRQHandler(void)
 {
-  // This is not used in the simplified blocking implementation
 }

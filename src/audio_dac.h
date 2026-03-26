@@ -28,3 +28,6 @@ uint8_t audioDacGetProgress(void);
 
 /// Called by timer interrupt (internal use)
 extern "C" void TIM2_IRQHandler(void);
+
+/// Test 1kHz sine beep (DAC debug)
+void test_beep(int duration_ms = 2000);

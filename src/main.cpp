@@ -69,7 +69,7 @@ void motorTask(void *pvParameters)
       {
         motorSet((MotorId)msg.param, msg.on);
 
-        logPrintf("Motor %d set to %s", (int)msg.param, msg.on ? "ON" : "OFF");
+        logPrintf("Motor %d set to %s\n", (int)msg.param, msg.on ? "ON" : "OFF");
       }
     }
   }
@@ -97,6 +97,10 @@ void audioTask(void *pvParameters)
         {
           logPrintln("Play DONE");
         }
+      }
+      else if (msg.cmd == CMD_TEST_AUDIO)
+      {
+        test_beep();
       }
     }
   }
