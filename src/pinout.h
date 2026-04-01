@@ -69,7 +69,7 @@
 // --- Audio output (PWM) ---
 // Used by the audio playback helper.
 #define AUDIO_PWM_PIN      PA4
-#define AUDIO_SAMPLE_RATE  8000  // Hz (adjust if needed)
+#define AUDIO_SAMPLE_RATE  16000  // Hz
 
 // --- Button input ---
 // For multi-function button control.

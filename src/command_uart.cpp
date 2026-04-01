@@ -307,6 +307,9 @@ void commTask(void *pvParameters)
                 {
                     cli_execute(buffer);
                     index = 0;
+
+                    if (uploadMode)
+                        break;  // Exit CLI loop immediately - don't read binary data as commands
                 }
 
                 logPrint("> ");

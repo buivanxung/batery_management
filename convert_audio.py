@@ -26,7 +26,7 @@ import subprocess
 from pathlib import Path
 
 # Audio specifications for STM32G070 (FIXED)
-SAMPLE_RATE = 8000  # Hz - must match AUDIO_SAMPLE_RATE in audio_dac.h
+SAMPLE_RATE = 16000  # Hz - must match AUDIO_SAMPLE_RATE in audio_dac.h
 BIT_DEPTH = 8  # bits
 CHANNELS = 1  # mono
 CODEC = 'pcm_s8'  # 8-bit signed

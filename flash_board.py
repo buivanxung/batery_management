@@ -52,6 +52,32 @@ def crc16(data: bytes) -> int:
     return crc
 
 
+# ===== REQUIREMENTS CHECK =====
+def check_requirements() -> bool:
+    """Verify all required tools are installed."""
+    print("\n[*] Checking requirements...")
+    
+    # Check platformio
+    result = subprocess.run([sys.executable, '-m', 'platformio', '--version'], 
+                          capture_output=True, text=True)
+    if result.returncode != 0:
+        print("✗ platformio not installed")
+        print("  Install: pip install platformio")
+        return False
+    print("  ✓ platformio OK")
+    
+    # Check pyserial
+    try:
+        import serial
+        print("  ✓ pyserial OK")
+    except ImportError:
+        print("✗ pyserial not installed")
+        print("  Install: pip install pyserial")
+        return False
+    
+    return True
+
+
 # ===== STEP 1: Build + Upload firmware =====
 def flash_firmware(motors: int) -> bool:
     env = f"nucleo_g070rb_{motors}motor"
@@ -59,7 +85,7 @@ def flash_firmware(motors: int) -> bool:
     print(f"[1/2] Building + uploading firmware: {env}")
     print(f"{'='*60}")
 
-    cmd = ['platformio', 'run', '-e', env, '--target', 'upload']
+    cmd = [sys.executable, '-m', 'platformio', 'run', '-e', env, '--target', 'upload']
     result = subprocess.run(cmd, cwd=str(Path(__file__).parent))
 
     if result.returncode != 0:
@@ -92,20 +118,25 @@ def upload_one(ser, name: str, data: bytes) -> bool:
     """Upload a single PCM file to flash via UART protocol."""
     ser.reset_input_buffer()
     ser.reset_output_buffer()
+    time.sleep(0.2)
 
     # Send STORE command
     cmd = f"store {name} {len(data)}\n"
     ser.write(cmd.encode())
+    ser.flush()
     print(f"  → {cmd.strip()}")
 
     if not wait_text(ser, "READY", timeout=5):
         print("  ✗ MCU did not respond READY")
         return False
 
+    # Drain any leftover bytes (e.g. "> " prompt after READY)
+    time.sleep(0.3)
+    ser.reset_input_buffer()
+
     # Send binary frames
     seq    = 0
     offset = 0
-    retries = 0
 
     while offset < len(data):
         chunk  = data[offset:offset + CHUNK]
@@ -116,22 +147,41 @@ def upload_one(ser, name: str, data: bytes) -> bool:
               + chunk \
               + crc.to_bytes(2, 'little')
 
-        while True:
-            ser.write(frame)
-            ack = ser.read(1)
+        # Send frame with retries per frame
+        frame_retries = 0
+        max_retries = 10
 
-            if ack == ACK:
-                break
-            elif ack == NACK:
-                print(f"    NACK seq={seq}, retrying...")
-                retries += 1
-            else:
-                print(f"    Timeout seq={seq}, retrying...")
-                retries += 1
+        while frame_retries < max_retries:
+            try:
+                ser.write(frame)
+                ser.flush()
+                time.sleep(0.05)  # Give MCU time to process
+                
+                ack = ser.read(1)
 
-            if retries > 5:
-                print("  ✗ Too many retries, aborting")
-                return False
+                if ack == ACK:
+                    break
+                elif ack == NACK:
+                    frame_retries += 1
+                    print(f"    NACK seq={seq}, retry {frame_retries}/{max_retries}")
+                    time.sleep(0.1)
+                elif len(ack) == 0:
+                    frame_retries += 1
+                    print(f"    Timeout seq={seq}, retry {frame_retries}/{max_retries}")
+                    time.sleep(0.1)
+                else:
+                    frame_retries += 1
+                    print(f"    Bad response seq={seq}: {ack.hex()}, retry {frame_retries}/{max_retries}")
+                    time.sleep(0.1)
+
+            except Exception as e:
+                frame_retries += 1
+                print(f"    Error seq={seq}: {e}, retry {frame_retries}/{max_retries}")
+                time.sleep(0.1)
+
+        if frame_retries >= max_retries:
+            print(f"  ✗ Frame seq={seq} failed after {max_retries} retries")
+            return False
 
         offset += length
         seq = (seq + 1) & 0xFF
@@ -141,6 +191,7 @@ def upload_one(ser, name: str, data: bytes) -> bool:
         print("  ✗ MCU did not respond DONE")
         return False
 
+    time.sleep(0.3)  # Wait after DONE before next file
     return True
 
 
@@ -148,7 +199,7 @@ def upload_audio(port: str, audio_dir: str) -> bool:
     try:
         import serial
     except ImportError:
-        print("✗ pyserial not installed. Run: pip3 install pyserial")
+        print("✗ pyserial not installed. Run: pip install pyserial")
         return False
 
     pcm_dir = Path(audio_dir)
@@ -168,33 +219,41 @@ def upload_audio(port: str, audio_dir: str) -> bool:
     print(f"      Port: {port} @ {UART_BAUD} baud")
     print(f"{'='*60}")
 
+    ser = None
     try:
-        ser = serial.Serial(port, UART_BAUD, timeout=UART_TIMEOUT)
+        ser = serial.Serial(port, UART_BAUD, timeout=UART_TIMEOUT, write_timeout=2)
     except Exception as e:
         print(f"✗ Cannot open serial port {port}: {e}")
+        print(f"  Check: Device Manager → Ports (COM & LPT)")
         return False
 
-    time.sleep(1)  # Let UART settle
+    try:
+        time.sleep(1.5)  # Let UART settle
 
-    success = 0
-    for pcm_file in pcm_files:
-        data = pcm_file.read_bytes()
-        size_kb = len(data) / 1024
-        duration = len(data) / 8000
-        print(f"\n  [{success+1}/{len(pcm_files)}] {pcm_file.name} ({size_kb:.1f}KB, {duration:.1f}s)")
+        success = 0
+        for pcm_file in pcm_files:
+            data = pcm_file.read_bytes()
+            size_kb = len(data) / 1024
+            duration = len(data) / 8000
+            print(f"\n  [{success+1}/{len(pcm_files)}] {pcm_file.name} ({size_kb:.1f}KB, {duration:.1f}s)")
 
-        if upload_one(ser, pcm_file.name, data):
-            print(f"  ✓ {pcm_file.name} OK")
-            success += 1
-        else:
-            print(f"  ✗ {pcm_file.name} FAILED")
+            if upload_one(ser, pcm_file.name, data):
+                print(f"  ✓ {pcm_file.name} OK")
+                success += 1
+            else:
+                print(f"  ✗ {pcm_file.name} FAILED")
 
-    ser.close()
+        print(f"\n{'='*60}")
+        print(f"Audio upload: {success}/{len(pcm_files)} files OK")
+        print(f"{'='*60}")
+        return success == len(pcm_files)
 
-    print(f"\n{'='*60}")
-    print(f"Audio upload: {success}/{len(pcm_files)} files OK")
-    print(f"{'='*60}")
-    return success == len(pcm_files)
+    finally:
+        if ser:
+            try:
+                ser.close()
+            except:
+                pass
 
 
 # ===== MAIN =====
@@ -222,6 +281,10 @@ Examples:
                         help='Skip audio upload, only flash firmware')
 
     args = parser.parse_args()
+
+    # Check requirements first
+    if not check_requirements():
+        sys.exit(1)
 
     print(f"\nSTM32G070 Flash Tool")
     print(f"  Motors    : {args.motors}")
