@@ -2,8 +2,11 @@
 
 #include <stdint.h>
 
-/// Motor identifiers (1..4).
-/// Add or remove motors to match your hardware / schematic.
+#ifndef MOTOR_COUNT
+#define MOTOR_COUNT 8
+#endif
+
+/// Motor identifiers (1-based).
 typedef enum
 {
   MOTOR_1 = 1,

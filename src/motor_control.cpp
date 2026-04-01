@@ -41,24 +41,24 @@ static const uint8_t chargeCtrlPins[] = {
 
 void motorInit(void)
 {
-  for (int i = MOTOR_1; i <= MOTOR_7; ++i)
+  for (int i = MOTOR_1; i <= MOTOR_COUNT; ++i)
   {
     pinMode(motorInPins[i], INPUT_PULLDOWN);
     pinMode(motorCtrlPins[i], OUTPUT);
     pinMode(chargeCtrlPins[i], OUTPUT);
 
     // Default to off when starting.
-    digitalWrite(chargeCtrlPins[i], LOW);
+    digitalWrite(chargeCtrlPins[i], HIGH);
     digitalWrite(motorCtrlPins[i], LOW);
   }
-  logPrintln("===Motors initialized");
+  logPrintf("===Motors initialized (%d motors)\n", MOTOR_COUNT);
 }
 
 void motorSet(MotorId motor, bool on)
 {
   uint32_t tickstart = HAL_GetTick();
   logPrintf("===Motors time start %ld motor %d curent value %d\n", tickstart, motor, digitalRead(motorInPins[motor]));
-  if (motor < MOTOR_1 || motor > MOTOR_8)
+  if (motor < MOTOR_1 || motor > MOTOR_COUNT)
   {
     return;
   }
@@ -93,7 +93,7 @@ void motorSet(MotorId motor, bool on)
 
 void motorSetAll(bool on)
 {
-  for (int i = MOTOR_1; i <= MOTOR_4; ++i)
+  for (int i = MOTOR_1; i <= MOTOR_COUNT; ++i)
   {
     motorSet((MotorId)i, on);
   }
