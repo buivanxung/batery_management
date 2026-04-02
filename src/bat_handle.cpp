@@ -26,7 +26,7 @@ uint16_t muxRead(uint8_t channel)
 {
     muxSelect(channel);
 
-    delayMicroseconds(5); // critical hold time for MUX settling
+    delayMicroseconds(50); // increased: 5→50µs for better MUX settling + less switching noise
 
     return analogRead(MUX_SIG);
 }

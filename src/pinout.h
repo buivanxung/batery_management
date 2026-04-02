@@ -72,8 +72,8 @@
 #define AUDIO_SAMPLE_RATE  16000  // Hz
 
 // --- Button input ---
-// For multi-function button control.
-#define BUTTON_PIN         PB4  // Adjust to your schematic
+// PB10 = J9 connector (TOP_TX), nối button → GND, dùng INPUT_PULLUP
+#define BUTTON_PIN         PB10
 
 #define MUX_S0 A11
 #define MUX_S1 A12

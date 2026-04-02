@@ -6,8 +6,8 @@
 #include <HardwareTimer.h>
 
 // ===== Double-buffer config =====
-#define AUDIO_BUF_SIZE  2048   // 2KB per buffer = 128ms at 16kHz
-#define FADE_SAMPLES    256    // 16ms fade at 16kHz, power-of-2 → use >>8
+#define AUDIO_BUF_SIZE   2048   // 2KB per buffer = 128ms at 16kHz
+#define FADE_SAMPLES     256    // 16ms fade at 16kHz, power-of-2 → use >>8
 
 typedef struct
 {
@@ -78,7 +78,7 @@ void audioTimerCallback(void)
     }
     else
     {
-      TIM14->CCR1 = 128;  // Silence = 50% duty, BTL output = 0V differential
+      TIM14->CCR1 = 128;  // Keep DC bias, no pop
       audioState.isPlaying = false;
     }
   }
@@ -123,7 +123,7 @@ void audioDacInit(void)
   pwmTimer->pause();
   TIM14->PSC  = 0;
   TIM14->ARR  = 255;
-  TIM14->CCR1 = 128;  // Idle = 50% duty = 2.5V DC = silence, no pop, no DC shift
+  TIM14->CCR1 = 0;    // Idle = 0% duty = pin LOW = no switching = no noise
   TIM14->EGR  = TIM_EGR_UG;
   pwmTimer->resume();
 
@@ -131,6 +131,7 @@ void audioDacInit(void)
   audioTimer = new HardwareTimer(TIM15);
   audioTimer->setOverflow(AUDIO_SAMPLE_RATE, HERTZ_FORMAT);
   audioTimer->attachInterrupt(audioTimerCallback);
+  audioTimer->pause();  // Ensure NOT running until audioDacPlayFile() calls resume()
 
   logPrintln("audioDacInit: 250kHz PWM, CCR=128 idle, fade in/out ready");
 }
@@ -192,7 +193,14 @@ bool audioDacPlayFile(SPIFlash *flash, const char *filename)
     audioState.streamComplete = true;  // File nhỏ hơn 1 buffer
   }
 
-  // Start: CCR đang ở 128 (idle), fade-in sẽ scale AC từ 0 → full
+  // DC ramp UP: 0 → 128 trước khi ISR chạy (loại bỏ pop đầu)
+  // 128 bước × 200µs ≈ 25ms ramp time - slow enough speaker filter handles smoothly
+  for (int16_t v = 0; v <= 128; v++)
+  {
+    TIM14->CCR1 = (uint8_t)v;
+    delayMicroseconds(200);  // 128 × 200µs ≈ 25ms
+  }
+
   audioState.fadeIdx    = 0;
   audioState.fadeOutIdx = 0;
   audioState.doFadeOut  = false;
@@ -228,6 +236,16 @@ bool audioDacPlayFile(SPIFlash *flash, const char *filename)
   }
 
   audioTimer->pause();
+
+  // Smooth DC ramp-down: 128→0 in task (slower = no audible pop)
+  // 128 bước × 200µs ≈ 25ms total ramp - imperceptible to ear
+  for (int16_t v = 128; v >= 0; v--)
+  {
+    TIM14->CCR1 = (uint8_t)v;
+    delayMicroseconds(200);  // 128 × 200µs ≈ 25ms
+  }
+  TIM14->CCR1 = 0;
+
   logPrintf("Playback done: %u samples played\n", audioState.playbackPos);
   return audioState.streamComplete;
 }
@@ -241,7 +259,7 @@ void audioDacStop(void)
 {
   audioState.isPlaying = false;
   if (audioTimer) audioTimer->pause();
-  TIM14->CCR1 = 128;  // Idle = silence, no DC shift
+  TIM14->CCR1 = 0;  // Idle: no switching, no noise
   memset(&audioState, 0, sizeof(audioState));
 }
 

@@ -11,7 +11,7 @@
 #include "logger.h"
 
 /* ===================== GLOBAL ===================== */
-QueueHandle_t queueLed;
+QueueHandle_t queueLed;     // UART CLI control
 QueueHandle_t queueAudio;
 QueueHandle_t queueMotor;
 
@@ -106,10 +106,88 @@ void audioTask(void *pvParameters)
   }
 }
 
-/* ===================== TASK: MAIN ===================== */
+/* ===================== TASK: BUTTON ===================== */
+// Single press: cycle khay1.pcm → khay2.pcm → ... → khayN.pcm → khay1.pcm
+// Double tap  : play xinchao.pcm
+#define DEBOUNCE_MS     50    // debounce thời gian
+#define DOUBLE_TAP_MS  400    // khoảng thời gian tối đa giữa 2 lần nhấn
+
+static void sendPlay(const char *filename)
+{
+  Message_t msg;
+  msg.cmd = CMD_PLAY_AUDIO;
+  strncpy(msg.name, filename, sizeof(msg.name) - 1);
+  msg.name[sizeof(msg.name) - 1] = '\0';
+  safeQueueSend(queueAudio, &msg);
+}
+
+void buttonTask(void *pvParameters)
+{
+  pinMode(BUTTON_PIN, INPUT_PULLUP);
+
+  int  khayIndex    = 1;   // 1..MOTOR_COUNT
+  bool lastState    = HIGH;
+  bool waitSecond   = false;
+  uint32_t lastPressTime = 0;
+
+  while (1)
+  {
+    bool cur = (bool)digitalRead(BUTTON_PIN);
+
+    // Phát hiện nhấn xuống (HIGH → LOW)
+    if (lastState == HIGH && cur == LOW)
+    {
+      vTaskDelay(pdMS_TO_TICKS(DEBOUNCE_MS));  // debounce
+      if (digitalRead(BUTTON_PIN) == LOW)      // xác nhận nhấn thật
+      {
+        uint32_t now = xTaskGetTickCount() * portTICK_PERIOD_MS;
+
+        if (waitSecond && (now - lastPressTime) <= DOUBLE_TAP_MS)
+        {
+          // Double tap → play xinchao
+          waitSecond = false;
+          sendPlay("xinchao.pcm");
+        }
+        else
+        {
+          // Lần nhấn đầu: đánh dấu chờ xem có nhấn lần 2 không
+          waitSecond    = true;
+          lastPressTime = now;
+        }
+      }
+    }
+
+    // Đã chờ đủ thời gian, không có tap thứ 2 → single press
+    if (waitSecond)
+    {
+      uint32_t now = xTaskGetTickCount() * portTICK_PERIOD_MS;
+      if ((now - lastPressTime) > DOUBLE_TAP_MS)
+      {
+        waitSecond = false;
+
+        char filename[16];
+        snprintf(filename, sizeof(filename), "khay%d.pcm", khayIndex);
+        sendPlay(filename);
+
+        khayIndex++;
+        if (khayIndex > MOTOR_COUNT)
+          khayIndex = 1;
+      }
+    }
+
+    lastState = cur;
+    vTaskDelay(pdMS_TO_TICKS(10));
+  }
+}
+
+
 void mainTask(void *pvParameters)
 {
   Message_t msg;
+
+  // Play xinchao khi boot xong
+  vTaskDelay(pdMS_TO_TICKS(500));  // Chờ audioTask sẵn sàng
+  sendPlay("xinchao.pcm");
 
   while (1)
   {
@@ -189,12 +267,13 @@ void setup()
   loggerInit();
 
   /* TASK */
-  xTaskCreate(mainTask, "MAIN", 512, NULL, 2, NULL);
-  xTaskCreate(ledTask, "LED", 256, NULL, 1, NULL);
-  xTaskCreate(commTask, "COMM", 1024, NULL, 1, NULL);
-  xTaskCreate(audioTask, "AUDIO", 1536, NULL, 1, NULL);
-  xTaskCreate(motorTask, "MOTOR", 512, NULL, 1, NULL);
-  xTaskCreate(adcTask, "ADC", 512, NULL, 1, NULL); // Add ADC task
+  xTaskCreate(mainTask,   "MAIN",   256,  NULL, 2, NULL);
+  xTaskCreate(ledTask,    "LED",    256,  NULL, 1, NULL);
+  xTaskCreate(commTask,   "COMM",   512,  NULL, 1, NULL);
+  xTaskCreate(audioTask,  "AUDIO",  1024, NULL, 1, NULL);
+  xTaskCreate(motorTask,  "MOTOR",  256,  NULL, 1, NULL);
+  xTaskCreate(adcTask,    "ADC",    256,  NULL, 1, NULL);
+  xTaskCreate(buttonTask, "BUTTON", 256,  NULL, 1, NULL);
 
   vTaskStartScheduler();
 }
