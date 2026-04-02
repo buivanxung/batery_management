@@ -308,13 +308,17 @@ bool flashFsWriteFileFromSerial_PRO(SPIFlash *flash,
   const uint8_t SOF = 0xAA;
 
   FsHeader h;
-  fs_readHeader(flash, h);
+  if (!fs_readHeader(flash, h))
+  {
+    logError("FS HEADER ERR");
+    return false;
+  }
 
   uint32_t addr = (h.writePtr + 0xFF) & ~0xFF;
 
   if (addr + length > flash->getCapacity())
   {
-    logPrintln("NO SPACE");
+    logError("NO SPACE");
     return false;
   }
 
@@ -328,7 +332,7 @@ bool flashFsWriteFileFromSerial_PRO(SPIFlash *flash,
   {
     if (millis() - startTime > 10000)
     {
-      logPrintln("TIMEOUT");
+      logError("TIMEOUT");
       return false;
     }
 

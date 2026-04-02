@@ -26,6 +26,7 @@ bool uploadMode = false;
 char uploadName[16];
 uint32_t uploadLength;
 bool cliEcho = true;
+bool silentMode = false;  // Disable logging during binary upload
 
 /* ===================== TOKENIZER ===================== */
 int cli_tokenize(char *input, char **argv)
@@ -192,14 +193,31 @@ void cmd_store(int argc, char **argv)
 
     uploadLength = atoi(argv[2]);
 
-    // 🔥 clear UART buffer
-    while (Serial1.available())
-        Serial1.read();
+    if (uploadLength == 0)
+    {
+        logPrintln("Invalid length");
+        return;
+    }
 
+    // Disable logging & echo BEFORE outputting anything
+    silentMode = true;
     cliEcho = false;
 
-    logPrintln("OK");    // Python chờ cái này
-    logPrintln("READY"); // Python chờ cái này
+    // Clear UART buffers
+    while (Serial1.available())
+        Serial1.read();
+    
+    Serial1.flush();
+    vTaskDelay(pdMS_TO_TICKS(10));
+
+    // Direct Serial1 output with explicit newlines
+    Serial1.print("OK\r\n");
+    Serial1.flush();
+    vTaskDelay(pdMS_TO_TICKS(5));
+    
+    Serial1.print("READY\r\n");
+    Serial1.flush();
+    vTaskDelay(pdMS_TO_TICKS(5));
 
     uploadMode = true;
 }
@@ -282,6 +300,7 @@ void commTask(void *pvParameters)
 
             uploadMode = false;
             cliEcho = true;
+            silentMode = false;  // Re-enable logging
 
             if (ok)
                 logPrintln("DONE");
@@ -299,12 +318,16 @@ void commTask(void *pvParameters)
 
             if (c == '\r' || c == '\n')
             {
-                logPrintln("");
-
                 buffer[index] = '\0';
 
                 if (index > 0)
                 {
+                    silentMode = (strcmp(buffer, "store") == 0) || // Detect "store" command early
+                                  strncmp(buffer, "store ", 6) == 0;
+                    
+                    if (!silentMode)
+                        logPrintln("");
+                    
                     cli_execute(buffer);
                     index = 0;
 
@@ -312,7 +335,8 @@ void commTask(void *pvParameters)
                         break;  // Exit CLI loop immediately - don't read binary data as commands
                 }
 
-                logPrint("> ");
+                if (!silentMode)
+                    logPrint("> ");
             }
             else if (c == 0x08 || c == 0x7F)
             {

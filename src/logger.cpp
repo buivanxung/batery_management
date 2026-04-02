@@ -34,6 +34,11 @@ void loggerInit()
 /* ===================== CORE ===================== */
 static void logSend(const char *str)
 {
+    extern bool silentMode;
+    
+    if (silentMode)
+        return;  // Suppress logging during binary upload
+    
     if (!logQueue)
         return;
 
@@ -74,4 +79,14 @@ void logPrintf(const char *fmt, ...)
     va_end(args);
 
     logSend(buf);
+}
+
+// Always log errors, even in silentMode
+void logError(const char *str)
+{
+    extern bool silentMode;
+    bool old_silent = silentMode;
+    silentMode = false;
+    logPrintln(str);
+    silentMode = old_silent;
 }
