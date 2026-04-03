@@ -8,6 +8,7 @@
 #include "audio_dac.h"
 #include "bat_man.h"
 #include "bat_handle.h"
+#include "bat_charge.h"
 #include "logger.h"
 
 /* ===================== GLOBAL ===================== */
@@ -112,12 +113,32 @@ void audioTask(void *pvParameters)
 #define DEBOUNCE_MS     50    // debounce thời gian
 #define DOUBLE_TAP_MS  400    // khoảng thời gian tối đa giữa 2 lần nhấn
 
+/**
+ * @brief Clear all pending audio messages from queue to prevent buffer buildup
+ */
+static void clearAudioQueue()
+{
+  Message_t dummy;
+  while (xQueueReceive(queueAudio, &dummy, 0) == pdPASS)
+  {
+    // Keep receiving until queue is empty
+  }
+}
+
+/**
+ * @brief Send audio message, clearing old queue items first
+ * Prevents backlog of audio when button is pressed rapidly
+ */
 static void sendPlay(const char *filename)
 {
   Message_t msg;
   msg.cmd = CMD_PLAY_AUDIO;
   strncpy(msg.name, filename, sizeof(msg.name) - 1);
   msg.name[sizeof(msg.name) - 1] = '\0';
+  
+  // Clear any pending audio to prevent buffer buildup
+  clearAudioQueue();
+  
   safeQueueSend(queueAudio, &msg);
 }
 
@@ -125,57 +146,74 @@ void buttonTask(void *pvParameters)
 {
   pinMode(BUTTON_PIN, INPUT_PULLUP);
 
-  int  khayIndex    = 1;   // 1..MOTOR_COUNT
-  bool lastState    = HIGH;
-  bool waitSecond   = false;
-  uint32_t lastPressTime = 0;
+  int  khayIndex    = 1;     // 1..MOTOR_COUNT
+  bool buttonPressed = false;
+  bool waitSecond = false;
+  uint32_t pressStartTime = 0;
+  uint32_t lastReleaseTime = 0;
 
   while (1)
   {
     bool cur = (bool)digitalRead(BUTTON_PIN);
 
-    // Phát hiện nhấn xuống (HIGH → LOW)
-    if (lastState == HIGH && cur == LOW)
+    // Detect button press (HIGH → LOW)
+    if (!buttonPressed && cur == LOW)
     {
-      vTaskDelay(pdMS_TO_TICKS(DEBOUNCE_MS));  // debounce
-      if (digitalRead(BUTTON_PIN) == LOW)      // xác nhận nhấn thật
+      vTaskDelay(pdMS_TO_TICKS(DEBOUNCE_MS));
+      if (digitalRead(BUTTON_PIN) == LOW)
       {
-        uint32_t now = xTaskGetTickCount() * portTICK_PERIOD_MS;
+        buttonPressed = true;
+        pressStartTime = xTaskGetTickCount() * portTICK_PERIOD_MS;
+        logPrintln("[BTN] Press detected");
+      }
+    }
 
-        if (waitSecond && (now - lastPressTime) <= DOUBLE_TAP_MS)
+    // Detect button release (LOW → HIGH)
+    if (buttonPressed && cur == HIGH)
+    {
+      vTaskDelay(pdMS_TO_TICKS(DEBOUNCE_MS));
+      if (digitalRead(BUTTON_PIN) == HIGH)
+      {
+        buttonPressed = false;
+        uint32_t now = xTaskGetTickCount() * portTICK_PERIOD_MS;
+        uint32_t pressDuration = now - pressStartTime;
+
+        logPrintf("[BTN] Release detected (duration: %lu ms)\n", pressDuration);
+
+        // Check for double tap (release and press again within DOUBLE_TAP_MS)
+        if (waitSecond && (now - lastReleaseTime) <= DOUBLE_TAP_MS)
         {
-          // Double tap → play xinchao
+          // Double tap detected → play move.pcm
           waitSecond = false;
-          sendPlay("xinchao.pcm");
+          logPrintln("[BTN] Double tap detected → Play move.pcm");
+          sendPlay("move.pcm");
         }
         else
         {
-          // Lần nhấn đầu: đánh dấu chờ xem có nhấn lần 2 không
-          waitSecond    = true;
-          lastPressTime = now;
+          // Single press or first tap of potential double tap
+          waitSecond = true;
+          lastReleaseTime = now;
+          
+          // Wait DOUBLE_TAP_MS to see if there's a second tap
+          vTaskDelay(pdMS_TO_TICKS(DOUBLE_TAP_MS));
+          
+          // If still waiting (no second press), do single press action
+          if (waitSecond)
+          {
+            waitSecond = false;
+            char filename[16];
+            snprintf(filename, sizeof(filename), "khay%d.pcm", khayIndex);
+            logPrintf("[BTN] Single press → Play %s\n", filename);
+            sendPlay(filename);
+
+            khayIndex++;
+            if (khayIndex > MOTOR_COUNT)
+              khayIndex = 1;
+          }
         }
       }
     }
 
-    // Đã chờ đủ thời gian, không có tap thứ 2 → single press
-    if (waitSecond)
-    {
-      uint32_t now = xTaskGetTickCount() * portTICK_PERIOD_MS;
-      if ((now - lastPressTime) > DOUBLE_TAP_MS)
-      {
-        waitSecond = false;
-
-        char filename[16];
-        snprintf(filename, sizeof(filename), "khay%d.pcm", khayIndex);
-        sendPlay(filename);
-
-        khayIndex++;
-        if (khayIndex > MOTOR_COUNT)
-          khayIndex = 1;
-      }
-    }
-
-    lastState = cur;
     vTaskDelay(pdMS_TO_TICKS(10));
   }
 }
@@ -273,6 +311,7 @@ void setup()
   xTaskCreate(audioTask,  "AUDIO",  1024, NULL, 1, NULL);
   xTaskCreate(motorTask,  "MOTOR",  256,  NULL, 1, NULL);
   xTaskCreate(adcTask,    "ADC",    256,  NULL, 1, NULL);
+  xTaskCreate(chargeTask, "CHARGE", 512,  NULL, 2, NULL);
   xTaskCreate(buttonTask, "BUTTON", 256,  NULL, 1, NULL);
 
   vTaskStartScheduler();
