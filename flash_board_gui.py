@@ -7,7 +7,6 @@ Wraps flash_board.py with a user-friendly interface
 
 import tkinter as tk
 from tkinter import ttk, messagebox, filedialog
-import serial.tools.list_ports
 import subprocess
 import threading
 import os
@@ -33,7 +32,54 @@ class FlashBoardGUI:
         self.process_running = False
         
         self.setup_ui()
+        self.bootstrap_dependencies()
         self.refresh_ports()
+
+    def _is_module_available(self, module_import_path):
+        """Check whether a Python module can be imported by the current interpreter."""
+        result = subprocess.run(
+            [sys.executable, "-c", f"import {module_import_path}"],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            cwd=str(Path(__file__).parent)
+        )
+        return result.returncode == 0
+
+    def _install_package(self, package_name):
+        """Install package with pip using the same Python interpreter as this GUI."""
+        self.log(f"Đang cài package: {package_name}")
+        result = subprocess.run(
+            [sys.executable, "-m", "pip", "install", "--upgrade", package_name],
+            cwd=str(Path(__file__).parent),
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True
+        )
+        if result.stdout:
+            for line in result.stdout.splitlines():
+                if line.strip():
+                    self.log(line, timestamp=False)
+        return result.returncode == 0
+
+    def bootstrap_dependencies(self):
+        """Auto-install runtime dependencies so the GUI can run on fresh machines."""
+        self.log("Kiểm tra dependency Python...", timestamp=False)
+
+        if not self._is_module_available("serial"):
+            self.log("Thiếu pyserial, tự động cài đặt...", timestamp=False)
+            if not self._install_package("pyserial"):
+                messagebox.showerror(
+                    "Thiếu dependency",
+                    "Không thể cài pyserial tự động.\nHãy chạy: python -m pip install pyserial"
+                )
+
+        if not self._is_module_available("platformio"):
+            self.log("Thiếu platformio, tự động cài đặt...", timestamp=False)
+            if not self._install_package("platformio"):
+                messagebox.showerror(
+                    "Thiếu dependency",
+                    "Không thể cài platformio tự động.\nHãy chạy: python -m pip install platformio"
+                )
         
     def setup_ui(self):
         """Setup user interface"""
@@ -147,8 +193,16 @@ class FlashBoardGUI:
     
     def refresh_ports(self):
         """Refresh available COM ports"""
+        try:
+            import serial.tools.list_ports as list_ports
+        except ImportError:
+            self.port_combo['values'] = ["Thiếu pyserial"]
+            self.port_var.set("Thiếu pyserial")
+            self.log("✗ Không thể đọc COM port: thiếu pyserial", timestamp=False)
+            return
+
         ports = []
-        for port, desc, hwid in serial.tools.list_ports.comports():
+        for port, desc, hwid in list_ports.comports():
             ports.append(f"{port} ({desc})")
         
         self.port_combo['values'] = ports if ports else ["Không tìm thấy port"]
@@ -244,6 +298,10 @@ class FlashBoardGUI:
         
         thread = threading.Thread(target=_run, daemon=True)
         thread.start()
+
+    def platformio_cmd(self, *args):
+        """Build a PlatformIO command that works even when `platformio` is not on PATH."""
+        return [sys.executable, "-m", "platformio", *args]
     
     def build_only(self):
         """Build firmware only"""
@@ -253,7 +311,7 @@ class FlashBoardGUI:
             return
         
         env = f"nucleo_g070rb_{motors}motor"
-        cmd = [sys.executable, "platformio", "run", "-e", env]
+        cmd = self.platformio_cmd("run", "-e", env)
         self.run_command(cmd, "Build")
     
     def upload_only(self):
@@ -268,8 +326,7 @@ class FlashBoardGUI:
             messagebox.showerror("Lỗi", "Vui lòng chọn COM port!")
             return
         
-        env = f"nucleo_g070rb_{motors}motor"
-        cmd = [sys.executable, "platformio", "run", "-e", env, "--target", "upload"]
+        cmd = [sys.executable, "flash_board.py", "--motors", motors, "--port", port, "--skip-audio"]
         self.run_command(cmd, "Upload firmware")
     
     def build_and_upload(self):
@@ -284,8 +341,7 @@ class FlashBoardGUI:
             messagebox.showerror("Lỗi", "Vui lòng chọn COM port!")
             return
         
-        env = f"nucleo_g070rb_{motors}motor"
-        cmd = [sys.executable, "platformio", "run", "-e", env, "--target", "upload"]
+        cmd = [sys.executable, "flash_board.py", "--motors", motors, "--port", port, "--skip-audio"]
         self.run_command(cmd, "Build & Upload")
     
     def flash_audio_only(self):

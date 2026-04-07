@@ -4,6 +4,15 @@ REM Upload lên board qua ST-Link
 
 cd /d "%~dp0"
 
+py -3 --version >nul 2>&1
+if not errorlevel 1 (
+    set "PY_CMD=py -3"
+) else (
+    set "PY_CMD=python"
+)
+
+%PY_CMD% -m pip install --upgrade platformio >nul 2>&1
+
 echo ========================================
 echo   FLASH BOARD - UPLOAD FIRMWARE
 echo ========================================
@@ -19,7 +28,7 @@ echo.
 echo Đang upload firmware to board (%motors% motors, port: %port%)...
 echo.
 
-python -m platformio run -e nucleo_g070rb_%motors%motor -t upload
+%PY_CMD% flash_board.py --motors %motors% --port %port% --skip-audio
 
 if errorlevel 1 (
     echo.

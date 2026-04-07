@@ -26,6 +26,7 @@ import sys
 import time
 import argparse
 import subprocess
+import shutil
 from pathlib import Path
 
 # ===== CONFIG =====
@@ -38,6 +39,70 @@ SOF    = 0xAA
 CHUNK  = 256
 ACK    = b'\x06'
 NACK   = b'\x15'
+
+
+def find_stm32_programmer_cli() -> str:
+    """Locate STM32_Programmer_CLI executable if installed."""
+    candidates = [
+        os.environ.get('STM32_PROGRAMMER_CLI', ''),
+        shutil.which('STM32_Programmer_CLI'),
+        shutil.which('STM32_Programmer_CLI.exe'),
+        r"C:\Program Files\STMicroelectronics\STM32Cube\STM32CubeProgrammer\bin\STM32_Programmer_CLI.exe",
+        r"C:\Program Files (x86)\STMicroelectronics\STM32Cube\STM32CubeProgrammer\bin\STM32_Programmer_CLI.exe",
+    ]
+
+    for path in candidates:
+        if path and Path(path).exists():
+            return str(path)
+    return ""
+
+
+def looks_like_locked_chip(output_text: str) -> bool:
+    """Best-effort detection for flash failures caused by readout protection/lock."""
+    text = (output_text or "").lower()
+    keywords = [
+        'read protection',
+        'readout protection',
+        'rdp',
+        'is protected',
+        'option bytes',
+        'flash loader cannot be loaded',
+        'failed to erase memory',
+        'memory is not writable',
+        'device is locked',
+    ]
+    return any(k in text for k in keywords)
+
+
+def try_unlock_chip() -> bool:
+    """Attempt to unlock STM32 chip (RDP) using STM32CubeProgrammer CLI."""
+    cli = find_stm32_programmer_cli()
+    if not cli:
+        print("✗ Chip appears locked but STM32_Programmer_CLI was not found")
+        print("  Install STM32CubeProgrammer to enable auto-unlock")
+        print("  https://www.st.com/en/development-tools/stm32cubeprog.html")
+        return False
+
+    print("\n[*] Detected possible chip lock. Attempting auto-unlock...")
+    unlock_commands = [
+        [cli, '-c', 'port=SWD', '-unlockrdp1'],
+        [cli, '-c', 'port=SWD', '-ob', 'RDP=0xAA'],
+    ]
+
+    for cmd in unlock_commands:
+        print(f"  -> {' '.join(cmd)}")
+        result = subprocess.run(cmd, capture_output=True, text=True)
+        combined = (result.stdout or '') + "\n" + (result.stderr or '')
+        if combined.strip():
+            print(combined.strip())
+
+        if result.returncode == 0:
+            print("✓ Unlock command succeeded")
+            time.sleep(1.0)
+            return True
+
+    print("✗ Auto-unlock failed")
+    return False
 
 # ===== CRC16 =====
 def crc16(data: bytes) -> int:
@@ -53,26 +118,56 @@ def crc16(data: bytes) -> int:
 
 
 # ===== REQUIREMENTS CHECK =====
-def check_requirements() -> bool:
-    """Verify all required tools are installed."""
-    print("\n[*] Checking requirements...")
-    
-    # Check platformio
-    result = subprocess.run([sys.executable, '-m', 'platformio', '--version'], 
-                          capture_output=True, text=True)
-    if result.returncode != 0:
-        print("✗ platformio not installed")
-        print("  Install: pip install platformio")
+def ensure_package(module_name: str, package_name: str = None) -> bool:
+    """Ensure a package is installed for the current Python interpreter."""
+    package = package_name or module_name
+
+    result = subprocess.run(
+        [sys.executable, '-c', f'import {module_name}'],
+        capture_output=True,
+        text=True
+    )
+    if result.returncode == 0:
+        print(f"  ✓ {package} OK")
+        return True
+
+    print(f"  - Missing {package}, installing...")
+    install_result = subprocess.run(
+        [sys.executable, '-m', 'pip', 'install', '--upgrade', package],
+        text=True
+    )
+    if install_result.returncode != 0:
+        print(f"✗ Failed to install {package}")
         return False
-    print("  ✓ platformio OK")
-    
-    # Check pyserial
-    try:
-        import serial
-        print("  ✓ pyserial OK")
-    except ImportError:
-        print("✗ pyserial not installed")
-        print("  Install: pip install pyserial")
+
+    verify_result = subprocess.run(
+        [sys.executable, '-c', f'import {module_name}'],
+        capture_output=True,
+        text=True
+    )
+    if verify_result.returncode != 0:
+        print(f"✗ {package} installed but import still failed")
+        return False
+
+    print(f"  ✓ {package} installed")
+    return True
+
+
+def check_requirements() -> bool:
+    """Verify all required tools are installed (auto-install if missing)."""
+    print("\n[*] Checking requirements...")
+
+    if not ensure_package('platformio'):
+        return False
+
+    # Verify PlatformIO command works after installation.
+    result = subprocess.run([sys.executable, '-m', 'platformio', '--version'], capture_output=True, text=True)
+    if result.returncode != 0:
+        print("✗ platformio command is still unavailable")
+        return False
+    print("  ✓ platformio command OK")
+
+    if not ensure_package('serial', 'pyserial'):
         return False
     
     return True
@@ -86,11 +181,28 @@ def flash_firmware(motors: int) -> bool:
     print(f"{'='*60}")
 
     cmd = [sys.executable, '-m', 'platformio', 'run', '-e', env, '--target', 'upload']
-    result = subprocess.run(cmd, cwd=str(Path(__file__).parent))
+    result = subprocess.run(cmd, cwd=str(Path(__file__).parent), capture_output=True, text=True)
+    combined = (result.stdout or '') + "\n" + (result.stderr or '')
+    if combined.strip():
+        print(combined)
 
     if result.returncode != 0:
         print(f"\n✗ Firmware upload FAILED (env: {env})")
-        return False
+
+        if looks_like_locked_chip(combined):
+            if not try_unlock_chip():
+                return False
+
+            print("\n[*] Retrying firmware upload after unlock...")
+            retry = subprocess.run(cmd, cwd=str(Path(__file__).parent), capture_output=True, text=True)
+            retry_output = (retry.stdout or '') + "\n" + (retry.stderr or '')
+            if retry_output.strip():
+                print(retry_output)
+            if retry.returncode != 0:
+                print("✗ Upload still failed after unlock attempt")
+                return False
+        else:
+            return False
 
     print(f"\n✓ Firmware uploaded OK ({motors} motors)")
     print(f"  Waiting {BOOT_WAIT}s for board to boot...")

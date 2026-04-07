@@ -1,3 +1,5 @@
+#pragma once
+
 #include <cstdint>
 #include <STM32FreeRTOS.h>
 #include "pinout.h"
