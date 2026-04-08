@@ -9,6 +9,14 @@ static ChargeManager_t chargeManager = {
 
 static uint16_t chargeAdcValues[8];
 
+static void chargeSetAllPinsHigh()
+{
+    for (uint8_t i = 0; i < NUM_BATTERY_SLOTS; i++)
+    {
+        digitalWrite(POGO_CTR_PINS[i], HIGH);
+    }
+}
+
 /* ===== Helper Functions ===== */
 
 /**
@@ -37,9 +45,9 @@ static void chargeInitPins()
     for (uint8_t i = 0; i < NUM_BATTERY_SLOTS; i++)
     {
         pinMode(POGO_CTR_PINS[i], OUTPUT);
-        chargeDisablePin(i);  // Start with all charging disabled
+        digitalWrite(POGO_CTR_PINS[i], HIGH);
     }
-    logPrintln("[CHARGE] Pins initialized");
+    logPrintln("[CHARGE] Pins initialized -> all MCU_CTR HIGH");
 }
 
 /* ===== Public Functions ===== */
@@ -190,6 +198,20 @@ bool chargeIsCharging(uint8_t slot)
 
 void chargeTask(void *pvParameters)
 {
+    // User request: keep all MCU_CTR pins HIGH continuously.
+    // Disable charge manager auto-switching logic because it toggles these pins.
+    chargeManagerInit();
+    chargeManagerSetEnabled(false);
+    chargeSetAllPinsHigh();
+    logPrintln("[CHARGE] FORCE mode: all MCU_CTR pins are HIGH");
+
+    while (1)
+    {
+        chargeSetAllPinsHigh();
+        vTaskDelay(pdMS_TO_TICKS(CHARGE_POLL_INTERVAL));
+    }
+
+#if 0
     BatterySlot_t slots[NUM_BATTERY_SLOTS];
     uint8_t candidates[2];
 
@@ -275,4 +297,5 @@ void chargeTask(void *pvParameters)
 
         vTaskDelay(pdMS_TO_TICKS(CHARGE_POLL_INTERVAL));
     }
+#endif
 }

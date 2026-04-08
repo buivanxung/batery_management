@@ -109,12 +109,12 @@ void adcTask(void *pvParameters)
             float vBat   = adcValueToBatteryVoltage(adcValues[i]);
             uint8_t pct  = batteryPercent(vBat);
             BatStatus_t st = batteryStatus(vBat);
-            const char *stStr = (st == BAT_STATUS_OVER_WARN) ? ">4.0V(sat)" :
-                                (st == BAT_STATUS_OVER)     ? "OVER" :
-                                (st == BAT_STATUS_CRITICAL) ? "CRITICAL" :
-                                (st == BAT_STATUS_LOW)      ? "LOW" : "OK";
-            logPrintf("BAT[%d] raw=%4u  %.3fV  %3d%%  %s\n",
-                      i, adcValues[i], vBat, pct, stStr);
+            // const char *stStr = (st == BAT_STATUS_OVER_WARN) ? ">4.0V(sat)" :
+            //                     (st == BAT_STATUS_OVER)     ? "OVER" :
+            //                     (st == BAT_STATUS_CRITICAL) ? "CRITICAL" :
+            //                     (st == BAT_STATUS_LOW)      ? "LOW" : "OK";
+            // logPrintf("BAT[%d] raw=%4u  %.3fV  %3d%%  %s\n",
+            //           i, adcValues[i], vBat, pct, stStr);
 
             // if (vBat < BAT_UNDERVOLTAGE)
             //     logPrintln("WARNING: UNDER-VOLTAGE");

@@ -31,7 +31,8 @@ from pathlib import Path
 
 # ===== CONFIG =====
 UART_BAUD    = 115200
-UART_TIMEOUT = 2         # seconds read timeout
+# Keep read timeout short so per-frame retries stay within MCU's 10s upload timeout.
+UART_TIMEOUT = 0.25      # seconds read timeout
 BOOT_WAIT    = 3         # seconds to wait after firmware upload
 AUDIO_DIR    = './out'   # default PCM output directory
 
@@ -232,13 +233,23 @@ def upload_one(ser, name: str, data: bytes) -> bool:
     ser.reset_output_buffer()
     time.sleep(0.2)
 
-    # Send STORE command
+    # Send STORE command, retry a few times to recover from a noisy CLI state.
     cmd = f"store {name} {len(data)}\n"
-    ser.write(cmd.encode())
-    ser.flush()
-    print(f"  → {cmd.strip()}")
+    got_ready = False
+    for cmd_try in range(1, 4):
+        ser.write(b"\n")
+        ser.flush()
+        time.sleep(0.05)
 
-    if not wait_text(ser, "READY", timeout=5):
+        ser.write(cmd.encode())
+        ser.flush()
+        print(f"  → {cmd.strip()} (try {cmd_try}/3)")
+
+        if wait_text(ser, "READY", timeout=5):
+            got_ready = True
+            break
+
+    if not got_ready:
         print("  ✗ MCU did not respond READY")
         return False
 
@@ -340,7 +351,7 @@ def upload_audio(port: str, audio_dir: str) -> bool:
         return False
 
     try:
-        time.sleep(1.5)  # Let UART settle
+        time.sleep(1.0)
 
         success = 0
         for pcm_file in pcm_files:
@@ -349,7 +360,15 @@ def upload_audio(port: str, audio_dir: str) -> bool:
             duration = len(data) / 8000
             print(f"\n  [{success+1}/{len(pcm_files)}] {pcm_file.name} ({size_kb:.1f}KB, {duration:.1f}s)")
 
-            if upload_one(ser, pcm_file.name, data):
+            file_ok = False
+            for file_try in range(1, 4):
+                if upload_one(ser, pcm_file.name, data):
+                    file_ok = True
+                    break
+                print(f"  ! Retry file {pcm_file.name} ({file_try}/3)")
+                time.sleep(0.2)
+
+            if file_ok:
                 print(f"  ✓ {pcm_file.name} OK")
                 success += 1
             else:
@@ -359,12 +378,11 @@ def upload_audio(port: str, audio_dir: str) -> bool:
         print(f"Audio upload: {success}/{len(pcm_files)} files OK")
         print(f"{'='*60}")
         return success == len(pcm_files)
-
     finally:
         if ser:
             try:
                 ser.close()
-            except:
+            except Exception:
                 pass
 
 

@@ -146,72 +146,60 @@ void buttonTask(void *pvParameters)
 {
   pinMode(BUTTON_PIN, INPUT_PULLUP);
 
-  int  khayIndex    = 1;     // 1..MOTOR_COUNT
-  bool buttonPressed = false;
-  bool waitSecond = false;
-  uint32_t pressStartTime = 0;
-  uint32_t lastReleaseTime = 0;
+  int khayIndex = 1; // 1..MOTOR_COUNT
+
+  bool stableLevel = HIGH;
+  bool lastRawLevel = HIGH;
+  uint32_t lastRawChangeMs = 0;
+
+  bool waitingSecondTap = false;
+  uint32_t firstReleaseMs = 0;
 
   while (1)
   {
-    bool cur = (bool)digitalRead(BUTTON_PIN);
+    uint32_t now = millis();
+    bool raw = (bool)digitalRead(BUTTON_PIN);
 
-    // Detect button press (HIGH → LOW)
-    if (!buttonPressed && cur == LOW)
+    if (raw != lastRawLevel)
     {
-      vTaskDelay(pdMS_TO_TICKS(DEBOUNCE_MS));
-      if (digitalRead(BUTTON_PIN) == LOW)
-      {
-        buttonPressed = true;
-        pressStartTime = xTaskGetTickCount() * portTICK_PERIOD_MS;
-        logPrintln("[BTN] Press detected");
-      }
+      lastRawLevel = raw;
+      lastRawChangeMs = now;
     }
 
-    // Detect button release (LOW → HIGH)
-    if (buttonPressed && cur == HIGH)
+    // Debounced edge detect
+    if ((now - lastRawChangeMs) >= DEBOUNCE_MS && stableLevel != raw)
     {
-      vTaskDelay(pdMS_TO_TICKS(DEBOUNCE_MS));
-      if (digitalRead(BUTTON_PIN) == HIGH)
+      stableLevel = raw;
+
+      // We only act on release edge for tap counting
+      if (stableLevel == HIGH)
       {
-        buttonPressed = false;
-        uint32_t now = xTaskGetTickCount() * portTICK_PERIOD_MS;
-        uint32_t pressDuration = now - pressStartTime;
-
-        logPrintf("[BTN] Release detected (duration: %lu ms)\n", pressDuration);
-
-        // Check for double tap (release and press again within DOUBLE_TAP_MS)
-        if (waitSecond && (now - lastReleaseTime) <= DOUBLE_TAP_MS)
+        if (waitingSecondTap && (now - firstReleaseMs) <= DOUBLE_TAP_MS)
         {
-          // Double tap detected → play move.pcm
-          waitSecond = false;
-          logPrintln("[BTN] Double tap detected → Play move.pcm");
+          waitingSecondTap = false;
+          logPrintln("[BTN] Double tap detected -> Play move.pcm");
           sendPlay("move.pcm");
         }
         else
         {
-          // Single press or first tap of potential double tap
-          waitSecond = true;
-          lastReleaseTime = now;
-          
-          // Wait DOUBLE_TAP_MS to see if there's a second tap
-          vTaskDelay(pdMS_TO_TICKS(DOUBLE_TAP_MS));
-          
-          // If still waiting (no second press), do single press action
-          if (waitSecond)
-          {
-            waitSecond = false;
-            char filename[16];
-            snprintf(filename, sizeof(filename), "khay%d.pcm", khayIndex);
-            logPrintf("[BTN] Single press → Play %s\n", filename);
-            sendPlay(filename);
-
-            khayIndex++;
-            if (khayIndex > MOTOR_COUNT)
-              khayIndex = 1;
-          }
+          waitingSecondTap = true;
+          firstReleaseMs = now;
         }
       }
+    }
+
+    // Timeout for second tap -> treat as single tap
+    if (waitingSecondTap && (now - firstReleaseMs) > DOUBLE_TAP_MS)
+    {
+      waitingSecondTap = false;
+      char filename[16];
+      snprintf(filename, sizeof(filename), "khay%d.pcm", khayIndex);
+      logPrintf("[BTN] Single press -> Play %s\n", filename);
+      sendPlay(filename);
+
+      khayIndex++;
+      if (khayIndex > MOTOR_COUNT)
+        khayIndex = 1;
     }
 
     vTaskDelay(pdMS_TO_TICKS(10));
