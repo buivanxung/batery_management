@@ -58,6 +58,76 @@ def find_stm32_programmer_cli() -> str:
     return ""
 
 
+def find_local_cubeprog_installer() -> str:
+    """Find STM32CubeProgrammer installer in local ./app folder."""
+    app_dir = Path(__file__).parent / 'app'
+    if not app_dir.exists():
+        return ""
+
+    patterns = [
+        'SetupSTM32CubeProgrammer*.exe',
+        '*CubeProgrammer*.exe',
+    ]
+    for pattern in patterns:
+        matches = sorted(app_dir.glob(pattern))
+        if matches:
+            return str(matches[0])
+    return ""
+
+
+def ensure_stm32_programmer_cli() -> str:
+    """Ensure STM32_Programmer_CLI exists; try local installer, then winget on Windows."""
+    cli = find_stm32_programmer_cli()
+    if cli:
+        return cli
+
+    if os.name != 'nt':
+        return ""
+
+    installer = find_local_cubeprog_installer()
+    if installer:
+        print("  - STM32CubeProgrammer CLI missing, trying local installer...")
+        print(f"    Installer: {installer}")
+        install_attempts = [
+            [installer, '/S'],
+            [installer, '/silent'],
+            [installer],
+        ]
+        for cmd in install_attempts:
+            print(f"    -> {' '.join(cmd)}")
+            result = subprocess.run(cmd, cwd=str(Path(__file__).parent), text=True)
+            if result.returncode == 0:
+                cli = find_stm32_programmer_cli()
+                if cli:
+                    print("  ✓ STM32CubeProgrammer installed from local installer")
+                    return cli
+    else:
+        print("  - No local STM32CubeProgrammer installer found in ./app")
+
+    winget_path = shutil.which('winget')
+    if winget_path:
+        print("  - Trying to install STM32CubeProgrammer via winget...")
+        result = subprocess.run(
+            [
+                winget_path,
+                'install',
+                '--id', 'STMicroelectronics.STM32CubeProgrammer',
+                '--source', 'winget',
+                '--accept-source-agreements',
+                '--accept-package-agreements',
+                '--silent',
+            ],
+            text=True
+        )
+        if result.returncode == 0:
+            cli = find_stm32_programmer_cli()
+            if cli:
+                print("  ✓ STM32CubeProgrammer installed via winget")
+                return cli
+
+    return ""
+
+
 def looks_like_locked_chip(output_text: str) -> bool:
     """Best-effort detection for flash failures caused by readout protection/lock."""
     text = (output_text or "").lower()
@@ -77,7 +147,7 @@ def looks_like_locked_chip(output_text: str) -> bool:
 
 def try_unlock_chip() -> bool:
     """Attempt to unlock STM32 chip (RDP) using STM32CubeProgrammer CLI."""
-    cli = find_stm32_programmer_cli()
+    cli = ensure_stm32_programmer_cli()
     if not cli:
         print("✗ Chip appears locked but STM32_Programmer_CLI was not found")
         print("  Install STM32CubeProgrammer to enable auto-unlock")

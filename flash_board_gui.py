@@ -20,6 +20,7 @@ class FlashBoardGUI:
         self.root.title("⚡ Flash Board Tool - Power Banking")
         self.root.geometry("900x700")
         self.root.resizable(False, False)
+        self.root.option_add("*Font", ("Segoe UI", 10))
         
         # Style
         style = ttk.Style()
@@ -34,6 +35,13 @@ class FlashBoardGUI:
         self.setup_ui()
         self.bootstrap_dependencies()
         self.refresh_ports()
+
+    def _utf8_env(self):
+        """Force UTF-8 so Vietnamese text is shown correctly in logs on Windows."""
+        env = os.environ.copy()
+        env["PYTHONUTF8"] = "1"
+        env["PYTHONIOENCODING"] = "utf-8"
+        return env
 
     def _is_module_available(self, module_import_path):
         """Check whether a Python module can be imported by the current interpreter."""
@@ -53,7 +61,10 @@ class FlashBoardGUI:
             cwd=str(Path(__file__).parent),
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
-            text=True
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            env=self._utf8_env()
         )
         if result.stdout:
             for line in result.stdout.splitlines():
@@ -91,7 +102,7 @@ class FlashBoardGUI:
         title = ttk.Label(header, text="⚡ FLASH BOARD TOOLS", font=("Arial", 16, "bold"))
         title.pack(side=tk.LEFT)
         
-        subtitle = ttk.Label(header, text="Nạp Firmware & Audio cho STM32", font=("Arial", 10))
+        subtitle = ttk.Label(header, text="Nạp Firmware & Audio cho STM32", font=("Segoe UI", 10))
         subtitle.pack(side=tk.LEFT, padx=20)
         
         # Separator
@@ -174,7 +185,7 @@ class FlashBoardGUI:
         
         # Text widget
         self.output_text = tk.Text(log_frame, height=15, yscrollcommand=scrollbar.set,
-                                    font=("Courier", 9), wrap=tk.WORD)
+                                    font=("Consolas", 10), wrap=tk.WORD)
         self.output_text.pack(fill=tk.BOTH, expand=True)
         scrollbar.config(command=self.output_text.yview)
         
@@ -184,7 +195,7 @@ class FlashBoardGUI:
         
         self.status_var = tk.StringVar(value="✓ Sẵn sàng")
         self.status_label = ttk.Label(status_frame, textvariable=self.status_var, 
-                                      foreground="green", font=("Arial", 10))
+                                      foreground="green", font=("Segoe UI", 10))
         self.status_label.pack(side=tk.LEFT)
         
         self.progress_var = tk.StringVar(value="")
@@ -268,7 +279,10 @@ class FlashBoardGUI:
                     stdout=subprocess.PIPE,
                     stderr=subprocess.STDOUT,
                     text=True,
-                    cwd=str(Path(__file__).parent)
+                    cwd=str(Path(__file__).parent),
+                    encoding="utf-8",
+                    errors="replace",
+                    env=self._utf8_env()
                 )
                 
                 for line in process.stdout:
