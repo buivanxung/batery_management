@@ -102,7 +102,7 @@ class FlashBoardGUI:
         title = ttk.Label(header, text="⚡ FLASH BOARD TOOLS", font=("Arial", 16, "bold"))
         title.pack(side=tk.LEFT)
         
-        subtitle = ttk.Label(header, text="Nạp Firmware & Audio cho STM32", font=("Segoe UI", 10))
+        subtitle = ttk.Label(header, text="Nạp Firmware & Audio cho STM32 + STM8", font=("Segoe UI", 10))
         subtitle.pack(side=tk.LEFT, padx=20)
         
         # Separator
@@ -156,6 +156,9 @@ class FlashBoardGUI:
         
         self.build_upload_btn = ttk.Button(btn_grid, text="🚀 Build + Upload", command=self.build_and_upload, width=18)
         self.build_upload_btn.pack(side=tk.LEFT, padx=5, pady=5)
+
+        self.stm8_btn = ttk.Button(btn_grid, text="🔐 STM8 Upload", command=self.stm8_unlock_upload, width=20)
+        self.stm8_btn.pack(side=tk.LEFT, padx=5, pady=5)
         
         # Advanced options frame
         adv_frame = ttk.LabelFrame(self.root, text="📋 Tùy Chọn Nâng Cao", padding=10)
@@ -252,6 +255,7 @@ class FlashBoardGUI:
         self.build_btn.config(state=tk.DISABLED)
         self.upload_btn.config(state=tk.DISABLED)
         self.build_upload_btn.config(state=tk.DISABLED)
+        self.stm8_btn.config(state=tk.DISABLED)
         self.flash_audio_btn.config(state=tk.DISABLED)
         self.process_running = True
     
@@ -260,6 +264,7 @@ class FlashBoardGUI:
         self.build_btn.config(state=tk.NORMAL)
         self.upload_btn.config(state=tk.NORMAL)
         self.build_upload_btn.config(state=tk.NORMAL)
+        self.stm8_btn.config(state=tk.NORMAL)
         self.flash_audio_btn.config(state=tk.NORMAL)
         self.process_running = False
     
@@ -357,6 +362,16 @@ class FlashBoardGUI:
         
         cmd = [sys.executable, "flash_board.py", "--motors", motors, "--port", port, "--skip-audio"]
         self.run_command(cmd, "Build & Upload")
+
+    def stm8_unlock_upload(self):
+        """Run STM8 default flow: upload firmware."""
+        batch_path = Path(__file__).parent / "RUN_FLASH_GUI.bat"
+        if not batch_path.exists():
+            messagebox.showerror("Lỗi", f"Không tìm thấy file: {batch_path}")
+            return
+
+        cmd = ["cmd", "/c", str(batch_path), "stm8", "--no-pause"]
+        self.run_command(cmd, "STM8 Upload")
     
     def flash_audio_only(self):
         """Flash audio files only"""
