@@ -55,16 +55,24 @@
 #define MOTOR8_IN_PIN     PB7
 #define MOTOR8_CTRL_PIN   PC11
 
-// --- Enable charge battery---
-// Enable pin control
-#define POGO1_CTR_PIN     PC8
-#define POGO2_CTR_PIN     PC6
-#define POGO3_CTR_PIN     PD9
-#define POGO4_CTR_PIN     PC2
-#define POGO5_CTR_PIN     PC0
-#define POGO6_CTR_PIN     PB14
+// --- POGO charging control GPIO (direct STM32 → charge circuit enable) ---
+// Also initialized by motorInit() to HIGH at startup.
+#define POGO6_CTR_PIN     PC8
+#define POGO5_CTR_PIN     PC6
+#define POGO4_CTR_PIN     PD9
+#define POGO3_CTR_PIN     PC2
+#define POGO2_CTR_PIN     PC0
+#define POGO1_CTR_PIN     PB14
 #define POGO7_CTR_PIN     PC12
 #define POGO8_CTR_PIN     PC13
+
+// --- POINT_CTR single-wire UART to STM8 boards (via 74HC4051 mux) ---
+// Select channel with MUX_S0/S1/S2, communicate via MUX_SIG (POINT_CTR signal line).
+// See stm8_comm.h / stm8_comm.cpp for the protocol.
+#define MUX_S0   PA11
+#define MUX_S1   PA12
+#define MUX_S2   PA15
+#define MUX_SIG  PA0
 
 // --- Audio output (PWM) ---
 // Used by the audio playback helper.
@@ -74,8 +82,3 @@
 // --- Button input ---
 // PB10 = J9 connector (TOP_TX), nối button → GND, dùng INPUT_PULLUP
 #define BUTTON_PIN         PB10
-
-#define MUX_S0 A11
-#define MUX_S1 A12
-#define MUX_S2 A15
-#define MUX_SIG PA0

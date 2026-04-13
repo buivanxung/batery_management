@@ -23,9 +23,5 @@ typedef enum {
 
 void muxInit();
 void muxSelect(uint8_t channel);
-uint16_t muxRead(uint8_t channel);
-void muxReadAll(uint16_t *values);
-float adcValueToBatteryVoltage(uint16_t adcValue);
 uint8_t batteryPercent(float voltage);
 BatStatus_t batteryStatus(float voltage);
-void adcTask(void *pvParameters);

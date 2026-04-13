@@ -2,6 +2,7 @@
 #include "flash_files.h"
 #include "bat_handle.h"
 #include "logger.h"
+#include "stm8_comm.h"
 
 #define CLI_MAX_ARGS 8
 #define CLI_BUFFER_SIZE 64
@@ -238,24 +239,30 @@ void cmd_format(int argc, char **argv)
 
 void cmd_mon(int argc, char **argv)
 {
-    uint16_t adcValues[8];
-    muxReadAll(adcValues);
-
-    logPrintln("ADC Battery Monitor:");
+    logPrintln("STM8 Battery Monitor (via UART):");
     for (int i = 0; i < 8; i++)
     {
-        float vBat = adcValueToBatteryVoltage(adcValues[i]);
-        char buf[60];
-        snprintf(buf, sizeof(buf), "CH%d raw=%u Vbat=%.3fV", i, adcValues[i], vBat);
-        logPrintln(buf);
-
-        if (vBat < BAT_UNDERVOLTAGE)
+        Stm8Status_t s = stm8GetStatus(i);
+        char buf[80];
+        if (s.ok)
         {
-            logPrintln("WARNING: UNDER-VOLTAGE");
+            float vBat = s.batMv / 1000.0f;
+            uint8_t pct = batteryPercent(vBat);
+            snprintf(buf, sizeof(buf),
+                     "CH%d %.3fV %3u%% pwKey=%s locked=%s",
+                     i, vBat, pct,
+                     s.pwKeyOn  ? "ON"  : "OFF",
+                     s.pwLocked ? "YES" : "NO");
+            logPrintln(buf);
+            if (vBat < BAT_UNDERVOLTAGE)
+                logPrintln("  WARNING: UNDER-VOLTAGE");
+            else if (vBat > BAT_OVERVOLTAGE)
+                logPrintln("  WARNING: OVER-VOLTAGE");
         }
-        else if (vBat > BAT_OVERVOLTAGE)
+        else
         {
-            logPrintln("WARNING: OVER-VOLTAGE");
+            snprintf(buf, sizeof(buf), "CH%d NO RESPONSE (err=0x%02X)", i, s.errCode);
+            logPrintln(buf);
         }
     }
 }

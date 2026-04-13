@@ -4,28 +4,22 @@
 #include <STM32FreeRTOS.h>
 #include "pinout.h"
 #include "bat_handle.h"
+#include "stm8_comm.h"
 
 /* ===== Charging Management Constants ===== */
 #define NUM_BATTERY_SLOTS    8
-#define CHARGE_THRESHOLD     20    // Switch charging if slot drops below 20%
+#define CHARGE_THRESHOLD     20    // Start charging when slot drops below this %
+#define CHARGE_FULL_STOP     90    // Stop charging when slot reaches this %
+#define CHARGE_TIMER_MINUTES 60    // N minutes STM8 keeps PIN_PW_KEY ON per charge cycle
 #define CHARGE_DEFAULT_SLOT  0     // Default slot to start charging
-#define CHARGE_POLL_INTERVAL 1000  // ms - Check battery levels
+#define CHARGE_POLL_INTERVAL 5000  // ms - Battery poll period
 
 /* ===== Battery Slot Detection ===== */
-#define BAT_PRESENT_MIN_VOLTAGE  3.5f   // Battery connected reads 4.5V through ADC
-#define BAT_ABSENT_MAX_VOLTAGE   1.5f   // No battery reads 0.6V through ADC
+#define BAT_PRESENT_MIN_VOLTAGE  3.5f
+#define BAT_ABSENT_MAX_VOLTAGE   1.5f
 
-/* ===== Charging Control Pin Mapping ===== */
-static const uint8_t POGO_CTR_PINS[NUM_BATTERY_SLOTS] = {
-    POGO1_CTR_PIN,  // Slot 0
-    POGO2_CTR_PIN,  // Slot 1
-    POGO3_CTR_PIN,  // Slot 2
-    POGO4_CTR_PIN,  // Slot 3
-    POGO5_CTR_PIN,  // Slot 4
-    POGO6_CTR_PIN,  // Slot 5
-    POGO7_CTR_PIN,  // Slot 6
-    POGO8_CTR_PIN,  // Slot 7
-};
+/* ===== POGO_CTR GPIO Pin Mapping (direct STM32 outputs) ===== */
+extern const uint8_t POGO_CTR_PINS[NUM_BATTERY_SLOTS];
 
 /* ===== Battery State Structure ===== */
 typedef struct {

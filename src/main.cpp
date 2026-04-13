@@ -298,7 +298,6 @@ void setup()
   xTaskCreate(commTask,   "COMM",   512,  NULL, 1, NULL);
   xTaskCreate(audioTask,  "AUDIO",  1024, NULL, 1, NULL);
   xTaskCreate(motorTask,  "MOTOR",  256,  NULL, 1, NULL);
-  xTaskCreate(adcTask,    "ADC",    256,  NULL, 1, NULL);
   xTaskCreate(chargeTask, "CHARGE", 512,  NULL, 2, NULL);
   xTaskCreate(buttonTask, "BUTTON", 256,  NULL, 1, NULL);
 
