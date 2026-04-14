@@ -18,7 +18,7 @@
 
 #define MAX_PAYLOAD_LEN   8
 #define INTER_BYTE_US     3000UL  // max wait between bytes within one frame
-#define SOF_WAIT_US       3000UL  // wait for start bit before giving up
+#define SOF_WAIT_US      12000UL  // wider start-bit window to reduce missed frames
 
 static uint8_t rxPayload[MAX_PAYLOAD_LEN];
 

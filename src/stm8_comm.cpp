@@ -13,6 +13,7 @@
 #define CMD_ACK_MASK      0x80u
 #define CMD_NACK          0x7Fu
 #define MAX_PAYLOAD       8u
+#define STM8_TXRX_RETRIES 3u
 
 #define STM8_DIAG_ENABLE  1
 #define STM8_DIAG_SLOT    4u
@@ -26,6 +27,8 @@
 // ── Bit-bang helpers ──────────────────────────────────────────────────────────
 
 static SemaphoreHandle_t stm8Mutex = nullptr;
+static SemaphoreHandle_t stm8BusArbMutex = nullptr;
+static volatile bool stm8AudioPending = false;
 static uint8_t stm8LastRxDiag = 0u;
 static bool stm8DiagScanActive = false;
 static uint32_t stm8LastDiagScanMs = 0;
@@ -74,6 +77,9 @@ static uint8_t stm8CalcCrc(uint8_t cmd, uint8_t len, const uint8_t *pl)
 static void stm8TxByte(uint8_t val)
 {
     const uint32_t b = 1000000UL / STM8_BAUD;
+
+    // Protect bit timing from ISR jitter during one UART byte.
+    taskENTER_CRITICAL();
     // Start bit: pull LOW
     pinMode(MUX_SIG, OUTPUT);
     digitalWrite(MUX_SIG, LOW);
@@ -91,6 +97,7 @@ static void stm8TxByte(uint8_t val)
     // Stop bit: release (HIGH)
     pinMode(MUX_SIG, INPUT_PULLUP);
     delayMicroseconds(b);
+    taskEXIT_CRITICAL();
 }
 
 // Receive one byte. Pin must already be INPUT_PULLUP.
@@ -105,6 +112,9 @@ static bool stm8RxByte(uint8_t *out, uint32_t timeoutUs)
         if ((micros() - t0) >= timeoutUs) return false;
     }
 
+    // Critical section only while sampling bits at fixed timing.
+    taskENTER_CRITICAL();
+
     // Skip to centre of bit 0
     delayMicroseconds(b + b / 2u);
 
@@ -114,6 +124,7 @@ static bool stm8RxByte(uint8_t *out, uint32_t timeoutUs)
         delayMicroseconds(b);
     }
     delayMicroseconds(b);   // consume stop bit
+    taskEXIT_CRITICAL();
     *out = v;
     return true;
 }
@@ -196,42 +207,78 @@ static Stm8Status_t stm8DoTransaction(uint8_t slot,
     Stm8Status_t r = {false, false, false, 0u, 0u};
     if (slot >= STM8_SLOT_COUNT) return r;
 
+    // Audio has highest priority: do not start new STM8 transactions while pending.
+    if (stm8AudioPending) return r;
+
+    // Audio and STM8 share timing-sensitive resources. Serialize access.
+    if (stm8BusArbMutex)
+        xSemaphoreTake(stm8BusArbMutex, portMAX_DELAY);
+
+    // Re-check after lock acquisition in case audio requested while we were waiting.
+    if (stm8AudioPending) {
+        if (stm8BusArbMutex) xSemaphoreGive(stm8BusArbMutex);
+        return r;
+    }
+
     if (stm8Mutex && xSemaphoreTake(stm8Mutex, pdMS_TO_TICKS(200)) != pdTRUE)
+    {
+        if (stm8BusArbMutex) xSemaphoreGive(stm8BusArbMutex);
         return r;  // could not acquire bus within 200 ms
+    }
 
-    // Select the target STM8 via 74HC4051
-    digitalWrite(MUX_S0,  slot & 0x01u);
-    digitalWrite(MUX_S1, (slot >> 1) & 0x01u);
-    digitalWrite(MUX_S2, (slot >> 2) & 0x01u);
-    delayMicroseconds(2);   // mux settling
-
-    // Send request
-    stm8TxFrame(cmd, plen, pl);
-
-    // Receive response
     uint8_t rxCmd = 0, rxLen = 0, rxPl[MAX_PAYLOAD];
-    bool ok = stm8RxFrame(&rxCmd, &rxLen, rxPl);
+    bool ok = false;
+    uint8_t attemptsUsed = 0;
+
+    for (uint8_t attempt = 0; attempt < STM8_TXRX_RETRIES; attempt++) {
+        if (stm8AudioPending) break;
+        attemptsUsed = (uint8_t)(attempt + 1u);
+        // Select the target STM8 via 74HC4051
+        digitalWrite(MUX_S0,  slot & 0x01u);
+        digitalWrite(MUX_S1, (slot >> 1) & 0x01u);
+        digitalWrite(MUX_S2, (slot >> 2) & 0x01u);
+        delayMicroseconds(50);   // allow mux + line to settle before frame
+
+        // Send request then wait response
+        stm8TxFrame(cmd, plen, pl);
+        ok = stm8RxFrame(&rxCmd, &rxLen, rxPl);
+        if (ok) {
+#if STM8_DIAG_ENABLE
+            if (slot == STM8_DIAG_SLOT && attemptsUsed > 1u) {
+                logPrintf("[STM8_DIAG] slot=%u cmd=0x%02X recovered on attempt=%u/%u\n",
+                          slot, cmd, attemptsUsed, (uint8_t)STM8_TXRX_RETRIES);
+            }
+#endif
+            break;
+        }
+
+        // Fast retry for cases where STM8 missed SOF due to polling window.
+        delayMicroseconds(1500);
+    }
 
     // Restore MUX_SIG to INPUT_PULLUP (idle)
     pinMode(MUX_SIG, INPUT_PULLUP);
 
     if (stm8Mutex) xSemaphoreGive(stm8Mutex);
+    if (stm8BusArbMutex) xSemaphoreGive(stm8BusArbMutex);
 
     if (!ok) {
 #if STM8_DIAG_ENABLE
         if (slot == STM8_DIAG_SLOT) {
             uint8_t sigLevel = (uint8_t)digitalRead(MUX_SIG);
-            logPrintf("[STM8_DIAG] slot=%u cmd=0x%02X fail=%u mux(S2,S1,S0)=(%u,%u,%u) sig=%u\n",
+            logPrintf("[STM8_DIAG] slot=%u cmd=0x%02X fail=%u attempt=%u/%u mux(S2,S1,S0)=(%u,%u,%u) sig=%u\n",
                       slot,
                       cmd,
                       stm8LastRxDiag,
+                      attemptsUsed,
+                      (uint8_t)STM8_TXRX_RETRIES,
                       (slot >> 2) & 0x01u,
                       (slot >> 1) & 0x01u,
                       slot & 0x01u,
                       sigLevel);
 
             // If SOF timeout persists, scan all channels to identify mapping/bus issues.
-            if (stm8LastRxDiag == STM8_DIAG_TIMEOUT_SOF) {
+            if (!stm8AudioPending && stm8LastRxDiag == STM8_DIAG_TIMEOUT_SOF) {
                 uint32_t now = millis();
                 if ((now - stm8LastDiagScanMs) > 3000UL) {
                     stm8LastDiagScanMs = now;
@@ -278,6 +325,8 @@ void stm8CommInit(void)
     // Mutex (safe to call before scheduler starts)
     if (!stm8Mutex)
         stm8Mutex = xSemaphoreCreateMutex();
+    if (!stm8BusArbMutex)
+        stm8BusArbMutex = xSemaphoreCreateMutex();
 
     // MUX select lines
     pinMode(MUX_S0, OUTPUT);
@@ -314,4 +363,18 @@ Stm8Status_t stm8SetPwTimer(uint8_t slot, uint16_t minutes)
 Stm8Status_t stm8GetData(uint8_t slot)
 {
     return stm8DoTransaction(slot, CMD_GET_DATA, 0u, nullptr);
+}
+
+void stm8AudioLock(void)
+{
+    stm8AudioPending = true;
+    if (stm8BusArbMutex)
+        xSemaphoreTake(stm8BusArbMutex, portMAX_DELAY);
+}
+
+void stm8AudioUnlock(void)
+{
+    if (stm8BusArbMutex)
+        xSemaphoreGive(stm8BusArbMutex);
+    stm8AudioPending = false;
 }

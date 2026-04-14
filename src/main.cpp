@@ -9,6 +9,7 @@
 #include "bat_man.h"
 #include "bat_handle.h"
 #include "bat_charge.h"
+#include "stm8_comm.h"
 #include "logger.h"
 
 /* ===================== GLOBAL ===================== */
@@ -69,10 +70,14 @@ void motorTask(void *pvParameters)
       if (msg.cmd == CMD_MOTOR_SET)
       {
         motorSet((MotorId)msg.param, msg.on);
-
+        vTaskDelay(pdMS_TO_TICKS(700)); // allow motor to start moving before next command
+        motorSet((MotorId)msg.param, true);
+        vTaskDelay(pdMS_TO_TICKS(700)); // allow motor to start moving before next command
+        motorSet((MotorId)msg.param, false);
         logPrintf("Motor %d set to %s\n", (int)msg.param, msg.on ? "ON" : "OFF");
       }
     }
+    vTaskDelay(pdMS_TO_TICKS(10));
   }
 }
 
@@ -90,7 +95,12 @@ void audioTask(void *pvParameters)
         logPrint("Play: ");
         logPrintln(msg.name);
 
-        if (!audioDacPlayFile(&flash, msg.name))
+        // Serialize audio playback with STM8 transactions.
+        stm8AudioLock();
+        bool ok = audioDacPlayFile(&flash, msg.name);
+        stm8AudioUnlock();
+
+        if (!ok)
         {
           logPrintln("Play FAIL");
         }
@@ -101,7 +111,9 @@ void audioTask(void *pvParameters)
       }
       else if (msg.cmd == CMD_TEST_AUDIO)
       {
+        stm8AudioLock();
         test_beep();
+        stm8AudioUnlock();
       }
     }
   }
@@ -111,7 +123,7 @@ void audioTask(void *pvParameters)
 // Single press: cycle khay1.pcm → khay2.pcm → ... → khayN.pcm → khay1.pcm
 // Double tap  : play xinchao.pcm
 #define DEBOUNCE_MS     50    // debounce thời gian
-#define DOUBLE_TAP_MS  400    // khoảng thời gian tối đa giữa 2 lần nhấn
+#define DOUBLE_TAP_MS  220    // giảm delay single-tap nhưng vẫn nhận double-tap tốt
 
 /**
  * @brief Clear all pending audio messages from queue to prevent buffer buildup
@@ -147,6 +159,7 @@ void buttonTask(void *pvParameters)
   pinMode(BUTTON_PIN, INPUT_PULLUP);
 
   int khayIndex = 1; // 1..MOTOR_COUNT
+  int currentKhay = 1; // currently selected tray
 
   bool stableLevel = HIGH;
   bool lastRawLevel = HIGH;
@@ -177,7 +190,13 @@ void buttonTask(void *pvParameters)
         if (waitingSecondTap && (now - firstReleaseMs) <= DOUBLE_TAP_MS)
         {
           waitingSecondTap = false;
-          logPrintln("[BTN] Double tap detected -> Play move.pcm");
+          Message_t motorMsg;
+          motorMsg.cmd = CMD_MOTOR_SET;
+          motorMsg.param = (uint32_t)currentKhay;
+          motorMsg.on = false; // open tray at currently selected slot
+          safeQueueSend(queueMotor, &motorMsg);
+
+          logPrintf("[BTN] Double tap detected -> Open khay%d + Play move.pcm\n", currentKhay);
           sendPlay("move.pcm");
         }
         else
@@ -192,6 +211,7 @@ void buttonTask(void *pvParameters)
     if (waitingSecondTap && (now - firstReleaseMs) > DOUBLE_TAP_MS)
     {
       waitingSecondTap = false;
+      currentKhay = khayIndex;
       char filename[16];
       snprintf(filename, sizeof(filename), "khay%d.pcm", khayIndex);
       logPrintf("[BTN] Single press -> Play %s\n", filename);
@@ -202,7 +222,7 @@ void buttonTask(void *pvParameters)
         khayIndex = 1;
     }
 
-    vTaskDelay(pdMS_TO_TICKS(10));
+    vTaskDelay(pdMS_TO_TICKS(5));
   }
 }
 
@@ -296,7 +316,7 @@ void setup()
   xTaskCreate(mainTask,   "MAIN",   256,  NULL, 2, NULL);
   xTaskCreate(ledTask,    "LED",    256,  NULL, 1, NULL);
   xTaskCreate(commTask,   "COMM",   512,  NULL, 1, NULL);
-  xTaskCreate(audioTask,  "AUDIO",  1024, NULL, 1, NULL);
+  xTaskCreate(audioTask,  "AUDIO",  1024, NULL, 3, NULL);
   xTaskCreate(motorTask,  "MOTOR",  256,  NULL, 1, NULL);
   xTaskCreate(chargeTask, "CHARGE", 512,  NULL, 2, NULL);
   xTaskCreate(buttonTask, "BUTTON", 256,  NULL, 1, NULL);

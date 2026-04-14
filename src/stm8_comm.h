@@ -55,3 +55,14 @@ Stm8Status_t stm8SetPwTimer(uint8_t slot, uint16_t minutes);
  * @return status with batMv and pwLocked populated; pwKeyOn not provided
  */
 Stm8Status_t stm8GetData(uint8_t slot);
+
+/**
+ * @brief Lock STM8 communication bus for long audio playback section.
+ *        While held, stm8GetStatus()/stm8SetPwTimer()/... will block.
+ */
+void stm8AudioLock(void);
+
+/**
+ * @brief Release lock acquired by stm8AudioLock().
+ */
+void stm8AudioUnlock(void);
