@@ -52,8 +52,8 @@
 #define LOCK_HOLD_MS     10000  // hold 10s to enter lock/unlock sequence mode
 #define TAP_TIMEOUT_MS   5000   // 5s window to complete tap sequence after hold
 #define DOUBLE_TAP_MS    350    // max gap to classify short press pattern as 1x/2x
-#define LOCK_TAPS        5      // 5 short presses to lock PIN_PW_KEY
-#define UNLOCK_TAPS      3      // 3 short presses to unlock PIN_PW_KEY
+#define LOCK_TAPS        3      // 3 short presses to lock PIN_PW_KEY
+#define UNLOCK_TAPS      5      // 5 short presses to unlock PIN_PW_KEY
 #define LOCK_RED_ON_MS   5000   // red LED indication time while locked
 
 #endif // CONFIG_H
