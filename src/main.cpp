@@ -123,7 +123,7 @@ void audioTask(void *pvParameters)
 // Single press: cycle khay1.pcm → khay2.pcm → ... → khayN.pcm → khay1.pcm
 // Double tap  : play xinchao.pcm
 #define DEBOUNCE_MS     50    // debounce thời gian
-#define DOUBLE_TAP_MS  220    // giảm delay single-tap nhưng vẫn nhận double-tap tốt
+#define DOUBLE_TAP_MS  300    // đủ rộng để debounce lần nhả thứ 2 vẫn kịp (>= DOUBLE_TAP_MS + DEBOUNCE_MS)
 
 /**
  * @brief Clear all pending audio messages from queue to prevent buffer buildup
@@ -208,7 +208,8 @@ void buttonTask(void *pvParameters)
     }
 
     // Timeout for second tap -> treat as single tap
-    if (waitingSecondTap && (now - firstReleaseMs) > DOUBLE_TAP_MS)
+    // raw==HIGH guard: prevent firing while user is still pressing tap2 (debounce race)
+    if (waitingSecondTap && (now - firstReleaseMs) > DOUBLE_TAP_MS && raw == HIGH)
     {
       waitingSecondTap = false;
       currentKhay = khayIndex;
@@ -234,15 +235,15 @@ void mainTask(void *pvParameters)
   // Play xinchao khi boot xong
   vTaskDelay(pdMS_TO_TICKS(500));  // Chờ audioTask sẵn sàng
   sendPlay("xinchao.pcm");
-
+  pinMode(LED_STATUS_PIN, OUTPUT);
   while (1)
   {
     // Reload watchdog to prevent reset
     IWatchdog.reload();
 
-    msg.cmd = CMD_LED_TOGGLE;
-    safeQueueSend(queueLed, &msg);
-
+    // msg.cmd = CMD_LED_TOGGLE;
+    // safeQueueSend(queueLed, &msg);
+    digitalWrite(LED_STATUS_PIN, !digitalRead(LED_STATUS_PIN));
     vTaskDelay(pdMS_TO_TICKS(1000));
   }
 }
@@ -314,11 +315,11 @@ void setup()
 
   /* TASK */
   xTaskCreate(mainTask,   "MAIN",   256,  NULL, 2, NULL);
-  xTaskCreate(ledTask,    "LED",    256,  NULL, 1, NULL);
+  // xTaskCreate(ledTask,    "LED",    256,  NULL, 1, NULL);
   xTaskCreate(commTask,   "COMM",   512,  NULL, 1, NULL);
   xTaskCreate(audioTask,  "AUDIO",  1024, NULL, 3, NULL);
   xTaskCreate(motorTask,  "MOTOR",  256,  NULL, 1, NULL);
-  xTaskCreate(chargeTask, "CHARGE", 512,  NULL, 2, NULL);
+  // xTaskCreate(chargeTask, "CHARGE", 512,  NULL, 2, NULL);
   xTaskCreate(buttonTask, "BUTTON", 256,  NULL, 1, NULL);
 
   vTaskStartScheduler();
