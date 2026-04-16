@@ -140,8 +140,8 @@ void loop() {
     }
   }
   
-  // ========== GREEN LED: Mirror power status ==========
-  digitalWrite(PIN_IP_GREEN, ledGreenState ? HIGH : LOW);
+  // ========== GREEN LED: Disabled for UART debug visibility ==========
+  digitalWrite(PIN_IP_GREEN, LOW);
 
   // ========== BUTTON STATE MACHINE ==========
   
