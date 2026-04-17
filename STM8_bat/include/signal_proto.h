@@ -11,5 +11,6 @@ void signalProtoPoll(bool pwLocked, uint16_t batMv);
  * Turns PIN_PW_KEY LOW automatically when the timer expires.
  */
 void signalProtoUpdatePwTimer(void);
+void sendHeartbeat(void);
 
 #endif // SIGNAL_PROTO_H

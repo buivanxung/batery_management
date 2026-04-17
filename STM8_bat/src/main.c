@@ -1,6 +1,9 @@
 #include <Arduino.h>
 #include "config.h"
 #include "signal_proto.h"
+
+// Prototype for heartbeat function
+extern void sendHeartbeat(void);
 //platformio\packages\tool-stm8flash\stm8flash.exe" -c stlinkv2 -p stm8s003f3 -u
 // Debug logging control
 #define DEBUG 0
@@ -306,4 +309,11 @@ void loop() {
     LOG_U16(getBatteryMV());
     LOG_STR("\r\n");
   }
+
+  // ========== HEARTBEAT TEST ==========
+  // static unsigned long lastHeartbeat = 0;
+  // if (now - lastHeartbeat >= 1000) {
+  //   lastHeartbeat = now;
+  //   sendHeartbeat();
+  // }
 }

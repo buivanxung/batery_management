@@ -19,10 +19,13 @@
 #define STM8_DIAG_SLOT    4u
 
 // ── Timeouts ──────────────────────────────────────────────────────────────────
-// STM8 adds ~2 ms turnaround before it starts its reply; allow 50 ms for SOF.
-#define RX_SOF_TIMEOUT_US    50000UL
-// Each subsequent byte must arrive within 3 ms of the previous one.
-#define INTER_BYTE_TO_US     3000UL
+// COMPATIBILITY: STM8 uses hardware UART, STM32 uses bit-bang UART on same line.
+// Timeouts are generous to accommodate hardware UART latency variability.
+// STM8 turnaround time ~2 ms + hardware buffering; allow 100 ms for SOF.
+#define RX_SOF_TIMEOUT_US    100000UL
+// Inter-byte timeout increased from 3ms to 10ms to match STM8 signalProtoInit.
+// Hardware UART RX buffering may accumulate bytes before CPU reads them.
+#define INTER_BYTE_TO_US     10000UL
 
 // ── Bit-bang helpers ──────────────────────────────────────────────────────────
 
@@ -130,6 +133,13 @@ static bool stm8RxByte(uint8_t *out, uint32_t timeoutUs)
 }
 
 // Send a complete request frame (open-drain TX, then release for RX).
+// 
+// COMPATIBILITY: STM8 receiver uses hardware UART with RX buffering.
+// This adds non-deterministic latency to frame reception, so:
+// 1) We allow longer RX_SOF_TIMEOUT_US (100ms vs 50ms)
+// 2) We allow longer INTER_BYTE_TO_US (10ms vs 3ms)
+// 3) STM8 transmits with hardware UART, so RX mute period accounts for TX buffering
+//
 static void stm8TxFrame(uint8_t cmd, uint8_t len, const uint8_t *pl)
 {
     uint8_t crc = stm8CalcCrc(cmd, len, pl);

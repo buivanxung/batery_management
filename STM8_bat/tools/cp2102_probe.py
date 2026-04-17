@@ -176,6 +176,7 @@ def send_and_receive(
     req_frame: bytes,
     timeout_s: float,
     retries: int,
+    tx_delay_s: float = 0.0,
 ) -> tuple[bytes, list[bytes], bytes | None]:
     tries = max(1, retries + 1)
     raw = b""
@@ -186,6 +187,10 @@ def send_and_receive(
         ser.reset_output_buffer()
         ser.write(req_frame)
         ser.flush()
+        
+        # Wait for STM8 to process and respond
+        if tx_delay_s > 0:
+            time.sleep(tx_delay_s)
 
         deadline = time.time() + timeout_s
         chunks: list[bytes] = []
@@ -234,11 +239,12 @@ def run_request(
     minutes: int,
     timeout_s: float,
     retries: int,
+    tx_delay_s: float = 0.0,
 ) -> None:
     req_cmd_id, req = build_request(cmd, pw, minutes)
     print("TX:", req.hex(" "))
 
-    raw, frames, response = send_and_receive(ser, req_cmd_id, req, timeout_s, retries)
+    raw, frames, response = send_and_receive(ser, req_cmd_id, req, timeout_s, retries, tx_delay_s)
     print("RAW:", raw.hex(" ") if raw else "(none)")
     print_frames(frames)
 
@@ -248,11 +254,11 @@ def run_request(
         print("RESULT:", frame_summary(response))
 
 
-def run_sweep(ser: serial.Serial, timeout_s: float, retries: int) -> None:
+def run_sweep(ser: serial.Serial, timeout_s: float, retries: int, tx_delay_s: float = 0.0) -> None:
     for name in ["GET_STATUS", "GET_DATA", "GET_DIAG"]:
         print("=" * 62)
         print("CMD:", name)
-        run_request(ser, name, pw=0, minutes=0, timeout_s=timeout_s, retries=retries)
+        run_request(ser, name, pw=0, minutes=0, timeout_s=timeout_s, retries=retries, tx_delay_s=tx_delay_s)
 
 
 def run_stress(
@@ -264,6 +270,7 @@ def run_stress(
     retries: int,
     count: int,
     interval_s: float,
+    tx_delay_s: float = 0.0,
 ) -> None:
     req_cmd_id, req = build_request(cmd, pw, minutes)
     ok_count = 0
@@ -271,7 +278,7 @@ def run_stress(
     timeout_count = 0
 
     for idx in range(1, count + 1):
-        raw, _, response = send_and_receive(ser, req_cmd_id, req, timeout_s, retries)
+        raw, _, response = send_and_receive(ser, req_cmd_id, req, timeout_s, retries, tx_delay_s)
         if response is None:
             timeout_count += 1
             print(f"[{idx}/{count}] TIMEOUT raw={raw.hex(' ') if raw else '(none)'}")
@@ -346,6 +353,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--listen-seconds", type=positive_float, default=4.0, help="Listen window for mode=listen")
     parser.add_argument("--count", type=positive_int, default=30, help="Number of cycles for mode=stress")
     parser.add_argument("--interval", type=non_negative_float, default=0.05, help="Delay between stress cycles")
+    parser.add_argument("--tx-delay", type=non_negative_float, default=0.0, help="Delay in seconds after TX before reading response")
     return parser.parse_args()
 
 
@@ -361,7 +369,7 @@ def main() -> None:
             return
 
         if args.mode == "sweep":
-            run_sweep(ser, args.timeout, args.retries)
+            run_sweep(ser, args.timeout, args.retries, args.tx_delay)
             return
 
         if args.mode == "stress":
@@ -374,10 +382,11 @@ def main() -> None:
                 args.retries,
                 args.count,
                 args.interval,
+                args.tx_delay,
             )
             return
 
-        run_request(ser, args.cmd, args.pw, args.minutes, args.timeout, args.retries)
+        run_request(ser, args.cmd, args.pw, args.minutes, args.timeout, args.retries, args.tx_delay)
 
 
 if __name__ == "__main__":
