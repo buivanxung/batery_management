@@ -8,15 +8,15 @@ extern void sendHeartbeat(void);
 // Debug logging control
 #define DEBUG 0
 
-#if DEBUG
-  #define LOG_STR(s) logWriteStr(s)
-  #define LOG_BOOL(v) logWriteBool(v)
-  #define LOG_U16(v) logWriteU16(v)
-#else
+// #if DEBUG
+//   #define LOG_STR(s) logWriteStr(s)
+//   #define LOG_BOOL(v) logWriteBool(v)
+//   #define LOG_U16(v) logWriteU16(v)
+// #else
   #define LOG_STR(s) do {} while(0)
   #define LOG_BOOL(v) do {} while(0)
   #define LOG_U16(v) do {} while(0)
-#endif
+// #endif
 
 // State tracking
 static unsigned long lastLogTime = 0;
@@ -312,7 +312,7 @@ void loop() {
 
   // ========== HEARTBEAT TEST ==========
   // static unsigned long lastHeartbeat = 0;
-  // if (now - lastHeartbeat >= 1000) {
+  // if (now - lastHeartbeat >= 5000) {
   //   lastHeartbeat = now;
   //   sendHeartbeat();
   // }

@@ -114,7 +114,7 @@ BatterySlot_t chargeGetBatterySlot(uint8_t slot)
 
     if (!s.ok)
     {
-        if (slot == 4) {
+        if (slot == 9) {
             LOG_SLOT4("FAILED to query");
 
             // Debug aid: probe adjacent channels to detect physical/index mismatch.
@@ -163,6 +163,8 @@ void chargeGetCandidates(BatterySlot_t *slots, uint8_t *candidates)
     // Read all 8 slots
     for (uint8_t i = 0; i < NUM_BATTERY_SLOTS; i++)
     {
+        logPrintf("[SCAN] STM32 scanning slot %u\n", i);
+        vTaskDelay(pdMS_TO_TICKS(5000));
         slots[i] = chargeGetBatterySlot(i);
     }
 
@@ -255,8 +257,10 @@ void chargeTask(void *pvParameters)
     chargeManagerInit();
     chargeManagerSetEnabled(true);
 
+    uint8_t scanSlot = 0;
     while (1)
     {
+        // --- To keep original logic, continue below ---
         if (!chargeManager.isEnabled)
         {
             vTaskDelay(pdMS_TO_TICKS(CHARGE_POLL_INTERVAL));

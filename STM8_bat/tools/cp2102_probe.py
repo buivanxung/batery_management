@@ -1,5 +1,6 @@
 import argparse
 import time
+from typing import Optional
 
 import serial
 
@@ -150,7 +151,7 @@ def crc_ok(frame: bytes) -> bool:
     return len(frame) >= 4 and frame[-1] == frame_crc(frame[:-1])
 
 
-def pick_response(frames: list[bytes], req_cmd_id: int) -> bytes | None:
+def pick_response(frames: list, req_cmd_id: int) -> Optional[bytes]:
     expected_ack = req_cmd_id | CMD_ACK_MASK
     valid = [f for f in frames if crc_ok(f)]
 
@@ -177,20 +178,31 @@ def send_and_receive(
     timeout_s: float,
     retries: int,
     tx_delay_s: float = 0.0,
-) -> tuple[bytes, list[bytes], bytes | None]:
+) -> tuple:
     tries = max(1, retries + 1)
     raw = b""
     frames: list[bytes] = []
 
+    def set_probe_low(ser, hold_ms=200):
+        # Tạm bỏ để debug - uncomment khi cần
+        # ser.dtr = False
+        # time.sleep(hold_ms / 1000.0)
+        # ser.dtr = True
+        pass
+
     for _ in range(tries):
         ser.reset_input_buffer()
         ser.reset_output_buffer()
+        # set_probe_low(ser, 200)  # Tạm bỏ
         ser.write(req_frame)
         ser.flush()
-        
+
         # Wait for STM8 to process and respond
+        # Tăng delay để STM8 có đủ thời gian xử lý
         if tx_delay_s > 0:
             time.sleep(tx_delay_s)
+        else:
+            time.sleep(0.1)  # Mặc định 100ms để STM8 xử lý và gửi phản hồi
 
         deadline = time.time() + timeout_s
         chunks: list[bytes] = []
@@ -348,7 +360,7 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument("--pw", type=int, default=1, help="SET_PW_KEY payload (0/1)")
     parser.add_argument("--minutes", type=non_negative_int, default=1, help="SET_PW_TIMER payload (0..65535)")
-    parser.add_argument("--timeout", type=positive_float, default=0.25, help="Read window in seconds")
+    parser.add_argument("--timeout", type=positive_float, default=1.0, help="Read window in seconds, default 1.0 (increased from 0.25)")
     parser.add_argument("--retries", type=non_negative_int, default=1, help="Extra retries when no valid ACK/NACK")
     parser.add_argument("--listen-seconds", type=positive_float, default=4.0, help="Listen window for mode=listen")
     parser.add_argument("--count", type=positive_int, default=30, help="Number of cycles for mode=stress")

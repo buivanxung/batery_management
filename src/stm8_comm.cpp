@@ -4,7 +4,7 @@
 #include <STM32FreeRTOS.h>
 
 // ── Protocol constants (must match STM8 signal_proto.c) ──────────────────────
-#define STM8_BAUD         9600U
+#define STM8_BAUD         2400U
 #define FRAME_SOF         0xA5u
 #define CMD_GET_STATUS    0x01u
 #define CMD_SET_PW_KEY    0x02u
@@ -55,11 +55,11 @@ static void stm8DiagScanAllChannels(void)
     stm8DiagScanActive = true;
 
     logPrintln("[STM8_DIAG] ---- Begin full MUX scan ----");
-    for (uint8_t i = 0; i < STM8_SLOT_COUNT; i++) {
-        Stm8Status_t s = stm8GetStatus(i);
-        logPrintf("[STM8_DIAG] scan slot=%u ok=%d batMv=%u lock=%d err=%u\n",
-                  i, s.ok, s.batMv, s.pwLocked, s.errCode);
-    }
+    // for (uint8_t i = 0; i < STM8_SLOT_COUNT; i++) {
+    //     Stm8Status_t s = stm8GetStatus(i);
+    //     logPrintf("[STM8_DIAG] scan slot=%u ok=%d batMv=%u lock=%d err=%u\n",
+    //               i, s.ok, s.batMv, s.pwLocked, s.errCode);
+    // }
     logPrintln("[STM8_DIAG] ---- End full MUX scan ----");
 
     stm8DiagScanActive = false;
@@ -89,7 +89,7 @@ static void stm8TxByte(uint8_t val)
     delayMicroseconds(b);
     for (uint8_t i = 0; i < 8; i++) {
         if (val & 1u) {
-            pinMode(MUX_SIG, INPUT_PULLUP); // release → 10 kΩ pulls to 5 V
+            pinMode(MUX_SIG, INPUT_PULLDOWN); // release → 10 kΩ pulls to 5 V
         } else {
             pinMode(MUX_SIG, OUTPUT);
             digitalWrite(MUX_SIG, LOW);
@@ -98,7 +98,7 @@ static void stm8TxByte(uint8_t val)
         val >>= 1;
     }
     // Stop bit: release (HIGH)
-    pinMode(MUX_SIG, INPUT_PULLUP);
+    pinMode(MUX_SIG, INPUT_PULLDOWN);
     delayMicroseconds(b);
     taskEXIT_CRITICAL();
 }
@@ -144,14 +144,20 @@ static void stm8TxFrame(uint8_t cmd, uint8_t len, const uint8_t *pl)
 {
     uint8_t crc = stm8CalcCrc(cmd, len, pl);
 
+    // Debug: log TX frame
+    logPrint("[STM8_UART][TX] ");
+    logPrintf("%02X %02X %02X ", (unsigned)FRAME_SOF, (unsigned)cmd, (unsigned)len);
+    for (uint8_t i = 0; i < len; i++) logPrintf("%02X ", pl ? pl[i] : 0);
+    logPrintf("%02X\n", crc);
+
     // Ensure line is released (idle HIGH via 10 kΩ) before we start
-    pinMode(MUX_SIG, INPUT_PULLUP);
+    pinMode(MUX_SIG, INPUT_PULLDOWN);
     delayMicroseconds(500);
 
     stm8TxByte(FRAME_SOF);
     stm8TxByte(cmd);
     stm8TxByte(len);
-    for (uint8_t i = 0; i < len; i++) stm8TxByte(pl[i]);
+    for (uint8_t i = 0; i < len; i++) stm8TxByte(pl ? pl[i] : 0);
     stm8TxByte(crc);
     // After last stop bit stm8TxByte already leaves pin as INPUT_PULLUP
 }
@@ -160,51 +166,68 @@ static void stm8TxFrame(uint8_t cmd, uint8_t len, const uint8_t *pl)
 // Returns false on timeout, bad SOF, oversized payload, or CRC mismatch.
 static bool stm8RxFrame(uint8_t *cmd, uint8_t *len, uint8_t *pl)
 {
-    pinMode(MUX_SIG, INPUT_PULLUP);
+    pinMode(MUX_SIG, INPUT_PULLDOWN); // Ensure line is released for STM8 to drive
 
     uint8_t b;
+    uint8_t rxbuf[16];
+    int rxidx = 0;
     stm8LastRxDiag = STM8_DIAG_OK;
     if (!stm8RxByte(&b, RX_SOF_TIMEOUT_US)) {
         stm8LastRxDiag = STM8_DIAG_TIMEOUT_SOF;
         return false;
     }
+    rxbuf[rxidx++] = b;
     if (b != FRAME_SOF) {
         stm8LastRxDiag = STM8_DIAG_BAD_SOF;
-        return false;
+        goto log_and_fail;
     }
     if (!stm8RxByte(cmd, INTER_BYTE_TO_US)) {
         stm8LastRxDiag = STM8_DIAG_TIMEOUT_CMD;
-        return false;
+        goto log_and_fail;
     }
+    rxbuf[rxidx++] = *cmd;
     if (!stm8RxByte(len, INTER_BYTE_TO_US)) {
         stm8LastRxDiag = STM8_DIAG_TIMEOUT_LEN;
-        return false;
+        goto log_and_fail;
     }
+    rxbuf[rxidx++] = *len;
     if (*len > MAX_PAYLOAD) {
         stm8LastRxDiag = STM8_DIAG_BAD_LEN;
-        return false;
+        goto log_and_fail;
     }
-
     for (uint8_t i = 0; i < *len; i++) {
         if (!stm8RxByte(&pl[i], INTER_BYTE_TO_US)) {
             stm8LastRxDiag = STM8_DIAG_TIMEOUT_PAYLOAD;
-            return false;
+            goto log_and_fail;
         }
+        rxbuf[rxidx++] = pl[i];
     }
-
     uint8_t crc;
     if (!stm8RxByte(&crc, INTER_BYTE_TO_US)) {
         stm8LastRxDiag = STM8_DIAG_TIMEOUT_CRC;
-        return false;
+        goto log_and_fail;
     }
+    rxbuf[rxidx++] = crc;
 
     if (crc != stm8CalcCrc(*cmd, *len, pl)) {
         stm8LastRxDiag = STM8_DIAG_BAD_CRC;
-        return false;
+        goto log_and_fail;
     }
+
+    // Debug: log RX frame
+    logPrint("[STM8_UART][RX] ");
+    for (int i = 0; i < rxidx; i++) logPrintf("%02X ", rxbuf[i]);
+    logPrint("\n");
 
     stm8LastRxDiag = STM8_DIAG_OK;
     return true;
+
+log_and_fail:
+    // Log partial RX frame if failed
+    logPrint("[STM8_UART][RX] (fail) ");
+    for (int i = 0; i < rxidx; i++) logPrintf("%02X ", rxbuf[i]);
+    logPrint("\n");
+    return false;
 }
 
 // ── Core transaction ──────────────────────────────────────────────────────────
@@ -247,14 +270,14 @@ static Stm8Status_t stm8DoTransaction(uint8_t slot,
         digitalWrite(MUX_S0,  slot & 0x01u);
         digitalWrite(MUX_S1, (slot >> 1) & 0x01u);
         digitalWrite(MUX_S2, (slot >> 2) & 0x01u);
-        delayMicroseconds(50);   // allow mux + line to settle before frame
+        delayMicroseconds(100);   // allow mux + line to settle before frame
 
         // Send request then wait response
         stm8TxFrame(cmd, plen, pl);
         ok = stm8RxFrame(&rxCmd, &rxLen, rxPl);
         if (ok) {
 #if STM8_DIAG_ENABLE
-            if (slot == STM8_DIAG_SLOT && attemptsUsed > 1u) {
+            if (attemptsUsed > 1u) {
                 logPrintf("[STM8_DIAG] slot=%u cmd=0x%02X recovered on attempt=%u/%u\n",
                           slot, cmd, attemptsUsed, (uint8_t)STM8_TXRX_RETRIES);
             }
@@ -267,7 +290,7 @@ static Stm8Status_t stm8DoTransaction(uint8_t slot,
     }
 
     // Restore MUX_SIG to INPUT_PULLUP (idle)
-    pinMode(MUX_SIG, INPUT_PULLUP);
+    pinMode(MUX_SIG, INPUT_PULLDOWN);
 
     if (stm8Mutex) xSemaphoreGive(stm8Mutex);
     if (stm8BusArbMutex) xSemaphoreGive(stm8BusArbMutex);
@@ -347,7 +370,7 @@ void stm8CommInit(void)
     digitalWrite(MUX_S2, LOW);
 
     // Signal line: idle as INPUT_PULLUP
-    pinMode(MUX_SIG, INPUT_PULLUP);
+    pinMode(MUX_SIG, INPUT_PULLDOWN);
 }
 
 Stm8Status_t stm8GetStatus(uint8_t slot)

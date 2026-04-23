@@ -30,7 +30,7 @@
 #define PW_ON_VERIFY_TIMEOUT_MS 1500
 
 // UART1 baud rate for STM32 communication (PD5 TX / PD6 RX via 74HC4051 mux)
-#define SIGNAL_UART_BAUD 9600
+#define SIGNAL_UART_BAUD 2400
 
 // Debug Serial baud — NOTE: Serial is now used for SIGNAL_UART_BAUD comms.
 // Set DEBUG=1 in main.c only if a separate debug channel is available.

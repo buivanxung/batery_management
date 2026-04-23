@@ -20,11 +20,11 @@
 
 #define MAX_PAYLOAD_LEN 8
 #define INTER_BYTE_US 10000UL // max wait between bytes within one frame
-#define UART_ECHO_TEST_MODE 1 // Enable echo test mode for debugging
+#define UART_ECHO_TEST_MODE 0 // Enable echo test mode for debugging
 
 // With fixed 1-wire hardware wiring, bytes transmitted on PD5 can be seen back on PD6.
 // Mute RX briefly after each TX frame to avoid parsing our own response as a new request.
-#define RX_MUTE_MARGIN_US 5000UL
+#define RX_MUTE_MARGIN_US 50000UL  // 50ms: enough for 5 bytes at 2400 baud (~20ms) + margin
 
 // Bit timing for 9600 baud (microseconds per bit)
 #define BIT_TIME_US (1000000UL / SIGNAL_UART_BAUD) // ~104us
@@ -58,6 +58,19 @@ static void satInc(uint8_t *v)
   }
 }
 
+// Đợi pin LOW với timeout, chỉ để tránh lệnh bị xử lý ngay lập tức
+static void waitForTrigger(uint8_t pin, unsigned long timeoutMs) {
+  unsigned long t0 = millis();
+  // Chỉ cần chờ đến khi nhận được byte đầu tiên hoặc timeout
+  // Không cần kiểm tra 200ms liên tục, vì frame sẽ có bit transition
+  while ((millis() - t0) < timeoutMs) {
+    if (digitalRead(pin) == LOW) {
+      delay(10); // Nhỏ delay để ổn định sau khi bắt đầu
+      return;
+    }
+  }
+}
+
 // BIT-BANG UART (Open-drain TX, required for one-wire half-duplex bus)
 // ============================================================================
 // Hardware: PD5(TX) --R5(22Ω)-- Signal_out --R6(22Ω)--R7(22Ω)-- PD6(RX)
@@ -74,6 +87,9 @@ static void satInc(uint8_t *v)
 // HIGH = release (INPUT), LOW = drive (OUTPUT LOW)
 static void bitbangTxByte(uint8_t val)
 {
+  // DEBUG: blink BLUE LED when transmitting a byte
+  digitalWrite(PIN_IP_BLUE, (digitalRead(PIN_IP_BLUE) == HIGH) ? LOW : HIGH);
+  
   // Start bit: drive LOW
   pinMode(PD5, OUTPUT);
   digitalWrite(PD5, LOW);
@@ -157,10 +173,12 @@ static uint8_t frameCrc(uint8_t cmd, uint8_t len, const uint8_t *payload)
 
 static void sendFrame(uint8_t cmd, uint8_t len, const uint8_t *payload)
 {
+  // DEBUG: (disabled for now - too many LEDs)
+  // digitalWrite(PIN_IP_GREEN, (digitalRead(PIN_IP_GREEN) == HIGH) ? LOW : HIGH);
+  
   uint8_t crc = frameCrc(cmd, len, payload);
-  uint8_t frameLen = (uint8_t)(len + 4); // SOF + CMD + LEN + CRC
 
-  // Bit-bang transmit: PD5 is released (INPUT) when idle, driven LOW for '0' bits
+  // Gửi bằng bit-bang UART (PD5 TX)
   bitbangTxByte(FRAME_SOF);
   bitbangTxByte(cmd);
   bitbangTxByte(len);
@@ -170,13 +188,22 @@ static void sendFrame(uint8_t cmd, uint8_t len, const uint8_t *payload)
   }
   bitbangTxByte(crc);
 
-  // After TX, PD5 is already released (INPUT) by bitbangTxByte's stop bit
-  // Mute RX to avoid parsing our own transmitted bytes as incoming frames
-  rxMuteUntilUs = micros() + (unsigned long)frameLen * (10UL * BIT_TIME_US) + RX_MUTE_MARGIN_US;
+  // Set RX mute period to avoid parsing our own transmitted bytes as incoming frames
+  // 5ms should be enough for 5 bytes * ~4ms per byte at 2400 baud + margin
+  rxMuteUntilUs = micros() + RX_MUTE_MARGIN_US;
 }
 
 static void sendNack(uint8_t reqCmd, uint8_t errorCode)
 {
+  // DEBUG: blink RED LED pattern based on error code
+  // Each error code: blink RED that many times
+  for (uint8_t i = 0; i < errorCode; i++) {
+    digitalWrite(PIN_IP_RED, LOW);
+    delayMicroseconds(100000); // 100ms
+    digitalWrite(PIN_IP_RED, HIGH);
+    delayMicroseconds(100000); // 100ms
+  }
+  
   uint8_t payload[2] = {reqCmd, errorCode};
   sendFrame(CMD_NACK, 2, payload);
 }
@@ -217,6 +244,9 @@ static void sendDataAck(uint8_t reqCmd, uint16_t batMv, bool pwLocked)
 
 static void handleRequest(uint8_t cmd, uint8_t len, bool pwLocked, uint16_t batMv)
 {
+  // DEBUG: blink RED LED when entering handleRequest
+  digitalWrite(PIN_IP_RED, (digitalRead(PIN_IP_RED) == HIGH) ? LOW : HIGH);
+  
   if (cmd == CMD_GET_STATUS)
   {
     if (len != 0)
@@ -312,17 +342,11 @@ static void handleRequest(uint8_t cmd, uint8_t len, bool pwLocked, uint16_t batM
 
 void signalProtoInit(void)
 {
-  // Configure PD5(TX) and PD6(RX) for bit-bang UART communication.
-  // One-wire bus: PD5 released (INPUT) when idle, driven LOW for '0' bits.
-  //
-  // COMPATIBILITY: Both STM8 and STM32 use bit-bang open-drain UART at 9600 baud.
-  // Hardware UART is NOT used because it cannot release TX to high-impedance.
-  // The 10K pull-up on STM32 side (PA0 → R9 → 5V) provides the HIGH level.
-
-  pinMode(PD5, INPUT);        // TX: high-impedance when idle (released)
-  pinMode(PD6, INPUT_PULLUP); // RX: input with pull-up
-
-  // NO Serial_begin() - we use bit-bang UART, not hardware UART
+  // Cấu hình chân RX: input để nhận data từ STM32
+  pinMode(PD6, INPUT);
+  
+  // Cấu hình chân TX: high-impedance when idle (released)
+  pinMode(PD5, INPUT);
 
   pwTimerActive = false;
   rxMuteUntilUs = 0;
@@ -334,7 +358,6 @@ void signalProtoInit(void)
   diagFramingErr = 0;
   diagFalseStartErr = 0;
   diagLastCmd = 0;
-  pd6PrevHigh = (digitalRead(PD6) == HIGH);
 }
 
 void signalProtoUpdatePwTimer(void)
@@ -353,6 +376,9 @@ void signalProtoPoll(bool pwLocked, uint16_t batMv)
   uint8_t byteIn, cmd, len, crc;
   unsigned long nowUs = micros();
 
+  // DEBUG: indicate PD6 line state on BLUE LED (active-low LED)
+  digitalWrite(PIN_IP_BLUE, (digitalRead(PD6) == HIGH) ? LOW : HIGH);
+
   // RX mute period after TX: prevents parsing our own transmitted bytes as incoming frames.
   if ((long)(nowUs - rxMuteUntilUs) < 0)
   {
@@ -362,49 +388,46 @@ void signalProtoPoll(bool pwLocked, uint16_t batMv)
   // Keep TX released (INPUT) while listening on shared signal line.
   pinMode(PD5, INPUT);
 
-  // Electrical probe: detect falling edges on signal line.
-  // Useful for distinguishing wiring/voltage issues from protocol-layer problems.
-  bool pd6NowHigh = (digitalRead(PD6) == HIGH);
-  if (pd6PrevHigh && !pd6NowHigh)
+  // Wait for first byte (SOF) with timeout using bit-bang RX
+  if (!bitbangRxByte(&byteIn, 100000UL))
   {
-    digitalWrite(PIN_IP_RED, (digitalRead(PIN_IP_RED) == HIGH) ? LOW : HIGH);
+    return; // Timeout waiting for SOF
   }
-  pd6PrevHigh = pd6NowHigh;
+  // Toggle RED LED on each received byte
+  digitalWrite(PIN_IP_RED, (digitalRead(PIN_IP_RED) == HIGH) ? LOW : HIGH);
 
-#if UART_ECHO_TEST_MODE
-  // Minimal electrical test: echo each received byte back using bit-bang.
-  if (digitalRead(PD6) != LOW)
-    return; // No start bit
-  if (!bitbangRxByte(&byteIn, 0))
-    return;
-  bitbangTxByte(byteIn);
-  return;
-#endif
-
-  // Fast path: check for start bit (LOW on PD6)
-  if (digitalRead(PD6) != LOW)
-    return;
-
-  // Start bit detected - try to read SOF byte
-  if (!bitbangRxByte(&byteIn, 0) || byteIn != FRAME_SOF)
+  if (byteIn != FRAME_SOF)
   {
     satInc(&diagFalseStartErr);
     return; // Not a valid SOF
   }
+  // DEBUG: (disabled - use RED for error indicator)
+  // digitalWrite(PIN_IP_GREEN, HIGH);
 
-  // SOF confirmed - now strictly enforce inter-byte timeouts for frame integrity.
+  // SOF confirmed - now read cmd with inter-byte timeout
   if (!bitbangRxByte(&cmd, INTER_BYTE_US))
   {
     satInc(&diagTimeoutErr);
     return;
   }
+  digitalWrite(PIN_IP_RED, (digitalRead(PIN_IP_RED) == HIGH) ? LOW : HIGH);
   diagLastCmd = cmd;
+  
+  // DEBUG: blink BLUE LED N times to show cmd value (1=0x01, 2=0x02, etc)
+  for (uint8_t i = 0; i < (cmd & 0x0F); i++) {
+    digitalWrite(PIN_IP_BLUE, LOW);
+    delayMicroseconds(50000);
+    digitalWrite(PIN_IP_BLUE, HIGH);
+    delayMicroseconds(50000);
+  }
 
+  // Read len
   if (!bitbangRxByte(&len, INTER_BYTE_US))
   {
     satInc(&diagTimeoutErr);
     return;
   }
+  digitalWrite(PIN_IP_RED, (digitalRead(PIN_IP_RED) == HIGH) ? LOW : HIGH);
 
   if (len > MAX_PAYLOAD_LEN)
   {
@@ -413,6 +436,7 @@ void signalProtoPoll(bool pwLocked, uint16_t batMv)
     return;
   }
 
+  // Read payload
   for (uint8_t i = 0; i < len; i++)
   {
     if (!bitbangRxByte(&rxPayload[i], INTER_BYTE_US))
@@ -420,13 +444,16 @@ void signalProtoPoll(bool pwLocked, uint16_t batMv)
       satInc(&diagTimeoutErr);
       return;
     }
+    digitalWrite(PIN_IP_RED, (digitalRead(PIN_IP_RED) == HIGH) ? LOW : HIGH);
   }
 
+  // Read crc
   if (!bitbangRxByte(&crc, INTER_BYTE_US))
   {
     satInc(&diagTimeoutErr);
     return;
   }
+  digitalWrite(PIN_IP_RED, (digitalRead(PIN_IP_RED) == HIGH) ? LOW : HIGH);
 
   if (crc != frameCrc(cmd, len, rxPayload))
   {
@@ -437,6 +464,10 @@ void signalProtoPoll(bool pwLocked, uint16_t batMv)
 
   // Frame received and verified successfully.
   satInc(&diagRxOk);
+  
+  // Small delay to let loopback settle
+  delayMicroseconds(1000); // 1ms
+  
   handleRequest(cmd, len, pwLocked, batMv);
 }
 
