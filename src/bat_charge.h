@@ -7,7 +7,9 @@
 #include "stm8_comm.h"
 
 /* ===== Charging Management Constants ===== */
-#define NUM_BATTERY_SLOTS    8
+
+#define NUM_BATTERY_SLOTS    8     // Total number of battery slots
+
 #define CHARGE_THRESHOLD     20    // Start charging when slot drops below this %
 #define CHARGE_FULL_STOP     90    // Stop charging when slot reaches this %
 #define CHARGE_TIMER_MINUTES 60    // N minutes STM8 keeps PIN_PW_KEY ON per charge cycle

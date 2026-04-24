@@ -1,22 +1,19 @@
 #include <Arduino.h>
 #include "config.h"
 #include "signal_proto.h"
-
-// Prototype for heartbeat function
-extern void sendHeartbeat(void);
 //platformio\packages\tool-stm8flash\stm8flash.exe" -c stlinkv2 -p stm8s003f3 -u
 // Debug logging control
 #define DEBUG 0
 
-// #if DEBUG
-//   #define LOG_STR(s) logWriteStr(s)
-//   #define LOG_BOOL(v) logWriteBool(v)
-//   #define LOG_U16(v) logWriteU16(v)
-// #else
+#if DEBUG
+  #define LOG_STR(s) logWriteStr(s)
+  #define LOG_BOOL(v) logWriteBool(v)
+  #define LOG_U16(v) logWriteU16(v)
+#else
   #define LOG_STR(s) do {} while(0)
   #define LOG_BOOL(v) do {} while(0)
   #define LOG_U16(v) do {} while(0)
-// #endif
+#endif
 
 // State tracking
 static unsigned long lastLogTime = 0;
@@ -143,8 +140,8 @@ void loop() {
     }
   }
   
-  // ========== GREEN LED: Disabled for UART debug visibility ==========
-  digitalWrite(PIN_IP_GREEN, LOW);
+  // ========== GREEN LED: Mirror power status ==========
+  digitalWrite(PIN_IP_GREEN, ledGreenState ? HIGH : LOW);
 
   // ========== BUTTON STATE MACHINE ==========
   
@@ -309,11 +306,4 @@ void loop() {
     LOG_U16(getBatteryMV());
     LOG_STR("\r\n");
   }
-
-  // ========== HEARTBEAT TEST ==========
-  // static unsigned long lastHeartbeat = 0;
-  // if (now - lastHeartbeat >= 5000) {
-  //   lastHeartbeat = now;
-  //   sendHeartbeat();
-  // }
 }

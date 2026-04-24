@@ -33,7 +33,7 @@ static ChargeManager_t chargeManager = {
 
 static void chargeEnablePin(uint8_t slot)
 {
-    if (slot >= NUM_BATTERY_SLOTS) return;
+    if (slot >= MOTOR_COUNT) return;
     // 1. Enable POGO hardware path via direct GPIO
     digitalWrite(POGO_CTR_PINS[slot], HIGH);
     // 2. Tell STM8 to keep its PIN_PW_KEY ON for N minutes via UART
@@ -45,7 +45,7 @@ static void chargeEnablePin(uint8_t slot)
 
 static void chargeDisablePin(uint8_t slot)
 {
-    if (slot >= NUM_BATTERY_SLOTS) return;
+    if (slot >= MOTOR_COUNT) return;
     // 1. Cancel timer on STM8 (turns PIN_PW_KEY OFF)
     stm8SetPwTimer(slot, 0);
     // 2. Disable POGO hardware path
@@ -58,7 +58,7 @@ static void chargeDisablePin(uint8_t slot)
 static void chargeInitPins()
 {
     // Init POGO_CTR GPIO pins (direct STM32 outputs, idle HIGH = enabled)
-    for (uint8_t i = 0; i < NUM_BATTERY_SLOTS; i++)
+    for (uint8_t i = 0; i < MOTOR_COUNT; i++)
     {
         pinMode(POGO_CTR_PINS[i], OUTPUT);
         digitalWrite(POGO_CTR_PINS[i], LOW);  // disabled until charging starts
@@ -95,7 +95,7 @@ BatterySlot_t chargeGetBatterySlot(uint8_t slot)
     BatterySlot_t bat;
     bat.slot = slot;
 
-    if (slot >= NUM_BATTERY_SLOTS)
+    if (slot >= MOTOR_COUNT)
     {
         bat.voltage = 0.0f;
         bat.percent = 0;
@@ -161,10 +161,9 @@ bool chargeIsBatteryPresent(uint8_t slot)
 void chargeGetCandidates(BatterySlot_t *slots, uint8_t *candidates)
 {
     // Read all 8 slots
-    for (uint8_t i = 0; i < NUM_BATTERY_SLOTS; i++)
+    for (uint8_t i = 0; i < MOTOR_COUNT; i++)
     {
-        logPrintf("[SCAN] STM32 scanning slot %u\n", i);
-        vTaskDelay(pdMS_TO_TICKS(5000));
+        logPrintf("[SCAN] STM32 scanning slot %u\n", i + 1);
         slots[i] = chargeGetBatterySlot(i);
     }
 
@@ -172,7 +171,7 @@ void chargeGetCandidates(BatterySlot_t *slots, uint8_t *candidates)
     uint8_t minSlot[2] = {0xFF, 0xFF};
     uint8_t minPercent[2] = {101, 101};
 
-    for (uint8_t i = 0; i < NUM_BATTERY_SLOTS; i++)
+    for (uint8_t i = 0; i < MOTOR_COUNT; i++)
     {
         if (!slots[i].isPresent)
             continue;  // Skip slots without batteries
@@ -202,7 +201,7 @@ void chargeGetCandidates(BatterySlot_t *slots, uint8_t *candidates)
 
 void chargeStartSlot(uint8_t slot)
 {
-    if (slot >= NUM_BATTERY_SLOTS)
+    if (slot >= MOTOR_COUNT)
         return;
 
     // Stop current charging
@@ -271,17 +270,17 @@ void chargeTask(void *pvParameters)
         chargeGetCandidates(slots, candidates);
 
         logPrintln("[CHARGE] ===== Charging Status =====");
-        for (uint8_t i = 0; i < NUM_BATTERY_SLOTS; i++)
+        for (uint8_t i = 0; i < MOTOR_COUNT; i++)
         {
             if (slots[i].isPresent)
             {
                 logPrintf("[CHARGE] Slot[%u]: %.2fV %3u%% %s\n",
-                          i, slots[i].voltage, slots[i].percent,
+                          i + 1, slots[i].voltage, slots[i].percent,
                           chargeIsCharging(i) ? "[CHARGING]" : "");
             }
             else
             {
-                logPrintf("[CHARGE] Slot[%u]: NO BATTERY\n", i);
+                logPrintf("[CHARGE] Slot[%u]: NO BATTERY\n", i + 1);
             }
         }
 
@@ -298,7 +297,7 @@ void chargeTask(void *pvParameters)
             vTaskDelay(pdMS_TO_TICKS(CHARGE_POLL_INTERVAL));
             continue;
         }
-
+        continue;  // For now, skip auto-charging logic to focus on status monitoring
         if (chargeManager.currentCharging == 0xFF)
         {
             // Nothing charging yet - start with lowest capacity slot
@@ -312,13 +311,13 @@ void chargeTask(void *pvParameters)
             if (!slots[cur].isPresent)
             {
                 // Battery removed from current slot
-                logPrintf("[CHARGE] Slot %u removed - switching\n", cur);
+                logPrintf("[CHARGE] Slot %u removed - switching\n", cur + 1);
                 chargeStartSlot(candidates[0]);
             }
             else if (slots[cur].percent >= CHARGE_FULL_STOP)
             {
                 // Current slot is full - stop or switch
-                logPrintf("[CHARGE] Slot %u full (%u%%) - stopping\n", cur, slots[cur].percent);
+                logPrintf("[CHARGE] Slot %u full (%u%%) - stopping\n", cur + 1, slots[cur].percent);
                 chargeDisablePin(cur);
                 chargeManager.currentCharging = 0xFF;
                 // Start next candidate if it needs charging
@@ -337,7 +336,7 @@ void chargeTask(void *pvParameters)
                     slots[other].percent < slots[cur].percent)
                 {
                     logPrintf("[CHARGE] Slot %u critical (%u%%) - switching from %u\n",
-                              other, slots[other].percent, cur);
+                              other + 1, slots[other].percent, cur + 1);
                     chargeStartSlot(other);
                 }
             }
