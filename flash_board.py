@@ -31,7 +31,8 @@ from pathlib import Path
 
 # ===== CONFIG =====
 UART_BAUD    = 115200
-UART_TIMEOUT = 2         # seconds read timeout
+# Keep read timeout short so per-frame retries stay within MCU's 10s upload timeout.
+UART_TIMEOUT = 0.25      # seconds read timeout
 BOOT_WAIT    = 3         # seconds to wait after firmware upload
 AUDIO_DIR    = './out'   # default PCM output directory
 
@@ -57,6 +58,76 @@ def find_stm32_programmer_cli() -> str:
     return ""
 
 
+def find_local_cubeprog_installer() -> str:
+    """Find STM32CubeProgrammer installer in local ./app folder."""
+    app_dir = Path(__file__).parent / 'app'
+    if not app_dir.exists():
+        return ""
+
+    patterns = [
+        'SetupSTM32CubeProgrammer*.exe',
+        '*CubeProgrammer*.exe',
+    ]
+    for pattern in patterns:
+        matches = sorted(app_dir.glob(pattern))
+        if matches:
+            return str(matches[0])
+    return ""
+
+
+def ensure_stm32_programmer_cli() -> str:
+    """Ensure STM32_Programmer_CLI exists; try local installer, then winget on Windows."""
+    cli = find_stm32_programmer_cli()
+    if cli:
+        return cli
+
+    if os.name != 'nt':
+        return ""
+
+    installer = find_local_cubeprog_installer()
+    if installer:
+        print("  - STM32CubeProgrammer CLI missing, trying local installer...")
+        print(f"    Installer: {installer}")
+        install_attempts = [
+            [installer, '/S'],
+            [installer, '/silent'],
+            [installer],
+        ]
+        for cmd in install_attempts:
+            print(f"    -> {' '.join(cmd)}")
+            result = subprocess.run(cmd, cwd=str(Path(__file__).parent), text=True)
+            if result.returncode == 0:
+                cli = find_stm32_programmer_cli()
+                if cli:
+                    print("  ✓ STM32CubeProgrammer installed from local installer")
+                    return cli
+    else:
+        print("  - No local STM32CubeProgrammer installer found in ./app")
+
+    winget_path = shutil.which('winget')
+    if winget_path:
+        print("  - Trying to install STM32CubeProgrammer via winget...")
+        result = subprocess.run(
+            [
+                winget_path,
+                'install',
+                '--id', 'STMicroelectronics.STM32CubeProgrammer',
+                '--source', 'winget',
+                '--accept-source-agreements',
+                '--accept-package-agreements',
+                '--silent',
+            ],
+            text=True
+        )
+        if result.returncode == 0:
+            cli = find_stm32_programmer_cli()
+            if cli:
+                print("  ✓ STM32CubeProgrammer installed via winget")
+                return cli
+
+    return ""
+
+
 def looks_like_locked_chip(output_text: str) -> bool:
     """Best-effort detection for flash failures caused by readout protection/lock."""
     text = (output_text or "").lower()
@@ -76,7 +147,7 @@ def looks_like_locked_chip(output_text: str) -> bool:
 
 def try_unlock_chip() -> bool:
     """Attempt to unlock STM32 chip (RDP) using STM32CubeProgrammer CLI."""
-    cli = find_stm32_programmer_cli()
+    cli = ensure_stm32_programmer_cli()
     if not cli:
         print("✗ Chip appears locked but STM32_Programmer_CLI was not found")
         print("  Install STM32CubeProgrammer to enable auto-unlock")
@@ -232,13 +303,23 @@ def upload_one(ser, name: str, data: bytes) -> bool:
     ser.reset_output_buffer()
     time.sleep(0.2)
 
-    # Send STORE command
+    # Send STORE command, retry a few times to recover from a noisy CLI state.
     cmd = f"store {name} {len(data)}\n"
-    ser.write(cmd.encode())
-    ser.flush()
-    print(f"  → {cmd.strip()}")
+    got_ready = False
+    for cmd_try in range(1, 4):
+        ser.write(b"\n")
+        ser.flush()
+        time.sleep(0.05)
 
-    if not wait_text(ser, "READY", timeout=5):
+        ser.write(cmd.encode())
+        ser.flush()
+        print(f"  → {cmd.strip()} (try {cmd_try}/3)")
+
+        if wait_text(ser, "READY", timeout=5):
+            got_ready = True
+            break
+
+    if not got_ready:
         print("  ✗ MCU did not respond READY")
         return False
 
@@ -340,7 +421,7 @@ def upload_audio(port: str, audio_dir: str) -> bool:
         return False
 
     try:
-        time.sleep(1.5)  # Let UART settle
+        time.sleep(1.0)
 
         success = 0
         for pcm_file in pcm_files:
@@ -349,7 +430,15 @@ def upload_audio(port: str, audio_dir: str) -> bool:
             duration = len(data) / 8000
             print(f"\n  [{success+1}/{len(pcm_files)}] {pcm_file.name} ({size_kb:.1f}KB, {duration:.1f}s)")
 
-            if upload_one(ser, pcm_file.name, data):
+            file_ok = False
+            for file_try in range(1, 4):
+                if upload_one(ser, pcm_file.name, data):
+                    file_ok = True
+                    break
+                print(f"  ! Retry file {pcm_file.name} ({file_try}/3)")
+                time.sleep(0.2)
+
+            if file_ok:
                 print(f"  ✓ {pcm_file.name} OK")
                 success += 1
             else:
@@ -359,12 +448,11 @@ def upload_audio(port: str, audio_dir: str) -> bool:
         print(f"Audio upload: {success}/{len(pcm_files)} files OK")
         print(f"{'='*60}")
         return success == len(pcm_files)
-
     finally:
         if ser:
             try:
                 ser.close()
-            except:
+            except Exception:
                 pass
 
 

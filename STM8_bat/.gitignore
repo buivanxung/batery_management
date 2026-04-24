@@ -3,10 +3,3 @@
 .vscode/c_cpp_properties.json
 .vscode/launch.json
 .vscode/ipch
-hw/*.pdsprj.*
-hw/Project Backups
-hw/*.DO
-hw/*.log
-hw/*.sts
-hw/*.EDF
-hw/*.rte
