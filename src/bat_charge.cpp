@@ -142,7 +142,9 @@ BatterySlot_t chargeGetBatterySlot(uint8_t slot)
     bat.voltage   = s.batMv / 1000.0f;
     bat.isPresent = (s.batMv >= (uint16_t)(BAT_PRESENT_MIN_VOLTAGE * 1000.0f));
     bat.status    = batteryStatus(bat.voltage);
-    bat.percent   = bat.isPresent ? batteryPercent(bat.voltage) : 0;
+    // Xác định đang sạc dựa vào chargeManager.currentCharging
+    bool isCharging = (chargeManager.currentCharging == slot);
+    bat.percent   = bat.isPresent ? batteryPercentWithCharging(bat.voltage, isCharging) : 0;
     
     if (slot == 4) {
         LOG_SLOT4("Status: voltage=%.2fV, percent=%u, present=%d, status=%d", 
@@ -167,34 +169,49 @@ void chargeGetCandidates(BatterySlot_t *slots, uint8_t *candidates)
         slots[i] = chargeGetBatterySlot(i);
     }
 
-    // Find 2 slots with smallest capacity (only those with batteries present)
+    // Ưu tiên chọn các slot có phần trăm 0% trước
+    uint8_t zeroSlots[2] = {0xFF, 0xFF};
+    uint8_t zeroCount = 0;
+    for (uint8_t i = 0; i < MOTOR_COUNT && zeroCount < 2; i++) {
+        if (slots[i].isPresent && slots[i].percent == 0) {
+            zeroSlots[zeroCount++] = i;
+        }
+    }
+    if (zeroCount == 2) {
+        candidates[0] = zeroSlots[0];
+        candidates[1] = zeroSlots[1];
+        return;
+    } else if (zeroCount == 1) {
+        candidates[0] = zeroSlots[0];
+        // Tìm slot nhỏ tiếp theo (khác slot 0%)
+        uint8_t minSlot = 0xFF;
+        uint8_t minPercent = 101;
+        for (uint8_t i = 0; i < MOTOR_COUNT; i++) {
+            if (!slots[i].isPresent || i == zeroSlots[0]) continue;
+            if (slots[i].percent < minPercent) {
+                minPercent = slots[i].percent;
+                minSlot = i;
+            }
+        }
+        candidates[1] = minSlot;
+        return;
+    }
+    // Nếu không có slot nào 0%, chọn 2 slot phần trăm thấp nhất như cũ
     uint8_t minSlot[2] = {0xFF, 0xFF};
     uint8_t minPercent[2] = {101, 101};
-
-    for (uint8_t i = 0; i < MOTOR_COUNT; i++)
-    {
-        if (!slots[i].isPresent)
-            continue;  // Skip slots without batteries
-
+    for (uint8_t i = 0; i < MOTOR_COUNT; i++) {
+        if (!slots[i].isPresent) continue;
         uint8_t pct = slots[i].percent;
-
-        // Update two lowest percentages
-        if (pct < minPercent[0])
-        {
-            // Shift first to second
+        if (pct < minPercent[0]) {
             minPercent[1] = minPercent[0];
             minSlot[1] = minSlot[0];
-            // Insert new lowest
             minPercent[0] = pct;
             minSlot[0] = i;
-        }
-        else if (pct < minPercent[1])
-        {
+        } else if (pct < minPercent[1]) {
             minPercent[1] = pct;
             minSlot[1] = i;
         }
     }
-
     candidates[0] = minSlot[0];
     candidates[1] = minSlot[1];
 }
@@ -216,7 +233,7 @@ void chargeStartSlot(uint8_t slot)
     // Start new slot
     chargeEnablePin(slot);
     chargeManager.currentCharging = slot;
-    logPrintf("[CHARGE] START charging slot %u\n", slot);
+    logPrintf("[CHARGE] START charging slot %u\n", slot + 1);
     if (slot == 4) {
         LOG_SLOT4("CHARGING START - PIN enabled");
     }
@@ -284,63 +301,11 @@ void chargeTask(void *pvParameters)
             }
         }
 
-        /* ===== Charging Logic =====
-         * - Enable POGO_CTR GPIO for charging hardware path
-         * - Send CMD_SET_PW_TIMER to STM8 so it keeps PIN_PW_KEY ON
-         * - One slot charging at a time; switch to lowest %
-         */
-
-        if (candidates[0] == 0xFF)
-        {
-            chargeStopAll();
-            logPrintln("[CHARGE] No batteries present");
-            vTaskDelay(pdMS_TO_TICKS(CHARGE_POLL_INTERVAL));
-            continue;
-        }
-        continue;  // For now, skip auto-charging logic to focus on status monitoring
-        if (chargeManager.currentCharging == 0xFF)
-        {
-            // Nothing charging yet - start with lowest capacity slot
-            if (slots[candidates[0]].percent < CHARGE_FULL_STOP)
-                chargeStartSlot(candidates[0]);
-        }
-        else
-        {
-            uint8_t cur = chargeManager.currentCharging;
-
-            if (!slots[cur].isPresent)
-            {
-                // Battery removed from current slot
-                logPrintf("[CHARGE] Slot %u removed - switching\n", cur + 1);
-                chargeStartSlot(candidates[0]);
-            }
-            else if (slots[cur].percent >= CHARGE_FULL_STOP)
-            {
-                // Current slot is full - stop or switch
-                logPrintf("[CHARGE] Slot %u full (%u%%) - stopping\n", cur + 1, slots[cur].percent);
-                chargeDisablePin(cur);
-                chargeManager.currentCharging = 0xFF;
-                // Start next candidate if it needs charging
-                if (candidates[0] != cur && candidates[0] != 0xFF &&
-                    slots[candidates[0]].percent < CHARGE_THRESHOLD)
-                {
-                    chargeStartSlot(candidates[0]);
-                }
-            }
-            else
-            {
-                // Still charging current slot - check if another is critically low
-                uint8_t other = (candidates[0] == cur) ? candidates[1] : candidates[0];
-                if (other != 0xFF &&
-                    slots[other].percent < CHARGE_THRESHOLD &&
-                    slots[other].percent < slots[cur].percent)
-                {
-                    logPrintf("[CHARGE] Slot %u critical (%u%%) - switching from %u\n",
-                              other + 1, slots[other].percent, cur + 1);
-                    chargeStartSlot(other);
-                }
-            }
-        }
+        // Luôn bật sạc cho 2 slot có phần trăm thấp nhất (nếu có pin)
+        if (candidates[0] != 0xFF && slots[candidates[0]].isPresent)
+            chargeStartSlot(candidates[0]);
+        if (candidates[1] != 0xFF && slots[candidates[1]].isPresent)
+            chargeStartSlot(candidates[1]);
 
         vTaskDelay(pdMS_TO_TICKS(CHARGE_POLL_INTERVAL));
     }

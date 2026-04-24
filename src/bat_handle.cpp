@@ -19,12 +19,24 @@ void muxSelect(uint8_t channel)
     digitalWrite(MUX_S2, (channel >> 2) & 0x01);
 }
 
-// Li-ion battery percentage: 3.0V = 0%, 4.2V = 100%
-uint8_t batteryPercent(float voltage)
+
+// Tính phần trăm pin theo trạng thái sạc/thực tế đo
+uint8_t batteryPercentWithCharging(float voltage, bool isCharging)
 {
-    if (voltage >= BAT_FULL)  return 100;
-    if (voltage <= BAT_EMPTY) return 0;
-    return (uint8_t)(((voltage - BAT_EMPTY) / (BAT_FULL - BAT_EMPTY)) * 100.0f);
+    if (isCharging) {
+        // Đang sạc: 3857mV = 0%, 4238mV = 100%
+        const float vEmpty = 3.857f;
+        const float vFull = 4.238f;
+        if (voltage >= vFull) return 100;
+        if (voltage <= vEmpty) return 0;
+        return (uint8_t)(((voltage - vEmpty) / (vFull - vEmpty)) * 100.0f);
+    } else {
+        // Không sạc: nếu đo trong khoảng 5.39–5.44V thì luôn trả về 0% (pin cạn) hoặc 100% (pin đầy)
+        if (voltage >= 5.43f) return 0; // Pin cạn (theo thực tế đo)
+        if (voltage <= 5.40f) return 100; // Pin đầy (theo thực tế đo)
+        // Ngoài ra fallback về 0
+        return 0;
+    }
 }
 
 BatStatus_t batteryStatus(float voltage)

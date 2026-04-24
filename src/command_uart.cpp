@@ -247,7 +247,7 @@ void cmd_mon(int argc, char **argv)
         if (s.ok)
         {
             float vBat = s.batMv / 1000.0f;
-            uint8_t pct = batteryPercent(vBat);
+            uint8_t pct = batteryPercentWithCharging(vBat, s.pwKeyOn);
             snprintf(buf, sizeof(buf),
                      "CH%d %.3fV %3u%% pwKey=%s locked=%s",
                      i, vBat, pct,
